@@ -1,0 +1,298 @@
+% =============================================================================
+% airwire — research bibliography
+% Working collection for the "airwave" audio-protocol research track.
+% Entries are grouped by theme. URLs are kept as annotations so the list stays
+% usable as a link collection while it matures into a formal bibliography.
+% Canonical/foundational references (Shannon, Reed-Solomon, ...) are cited from
+% their standard publication data; web-sourced entries carry a `url`/`note`.
+% =============================================================================
+
+% -----------------------------------------------------------------------------
+% Foundations: information theory & channel capacity
+% -----------------------------------------------------------------------------
+
+@article{shannon1948,
+  author  = {Shannon, Claude E.},
+  title   = {A Mathematical Theory of Communication},
+  journal = {The Bell System Technical Journal},
+  volume  = {27},
+  number  = {3},
+  pages   = {379--423},
+  year    = {1948},
+  note    = {Capacity of a noisy channel; the ceiling every feature/encoding is measured against.}
+}
+
+@book{coverthomas2006,
+  author    = {Cover, Thomas M. and Thomas, Joy A.},
+  title     = {Elements of Information Theory},
+  edition   = {2},
+  publisher = {Wiley-Interscience},
+  year      = {2006},
+  note      = {Water-filling over parallel channels — the model for allocating bits across features.}
+}
+
+% -----------------------------------------------------------------------------
+% Data over voice / telephone-band channels (the historical core problem)
+% -----------------------------------------------------------------------------
+
+@techreport{ituv21,
+  author      = {{ITU-T}},
+  title       = {Recommendation {V.21}: 300 bits per second duplex modem standardized for use in the general switched telephone network},
+  institution = {International Telecommunication Union},
+  year        = {1984},
+  note        = {FSK over the voiceband; descendant of the Bell 103 (1962). Baseline "audio carries bits" case.}
+}
+
+@techreport{ituv8,
+  author      = {{ITU-T}},
+  title       = {Recommendation {V.8}: Procedures for starting sessions of data transmission over the public switched telephone network},
+  institution = {International Telecommunication Union},
+  year        = {2000},
+  note        = {Session start-up / capability negotiation (CM/JM exchange). Prior art for our "capability agreement" phase.}
+}
+
+@techreport{ituv34,
+  author      = {{ITU-T}},
+  title       = {Recommendation {V.34}: A modem operating at data signalling rates of up to 33 600 bit/s for use on the general switched telephone network},
+  institution = {International Telecommunication Union},
+  year        = {1998},
+  note        = {Line-probing to measure channel capacity, then rate selection. Direct analogue of our probing phase. https://vocal.com/fax-modem/v-34-fax/}
+}
+
+@misc{dtmf_wikipedia,
+  author = {{Wikipedia}},
+  title  = {Dual-tone multi-frequency signaling ({DTMF})},
+  year   = {2026},
+  note   = {In-band signalling with discrete, robust symbols — a minimal "feature = pair of tones" scheme. https://en.wikipedia.org/wiki/DTMF_signaling}
+}
+
+@misc{fsk_wikipedia,
+  author = {{Wikipedia}},
+  title  = {Frequency-shift keying},
+  year   = {2026},
+  note   = {AFSK passes through AC-coupled speech/music equipment; history incl. SIGSALY (1943), Bell 103 (1962). https://en.wikipedia.org/wiki/Frequency-shift_keying}
+}
+
+% -----------------------------------------------------------------------------
+% Data through *speech codecs* (the hostile, non-linear voiceband)
+% -----------------------------------------------------------------------------
+
+@article{amrdatamodem,
+  author  = {LaDue, Chad K. and Sapozhnykov, Vitaliy V. and Fienberg, Kurt S.},
+  title   = {A Data Modem for {GSM} Adaptive Multi Rate Voice Channel},
+  journal = {IEEE Embedded Systems Letters},
+  year    = {2013},
+  note    = {Speech-like symbol codebooks pushed through the AMR vocoder; ~1.6-4 kbps. No closed-form model exists for a vocoder-as-data-channel. https://www.researchgate.net/publication/261082518}
+}
+
+@inproceedings{ecallamr,
+  author    = {{Various}},
+  title     = {Uncoded bit error rate of {eCall} modem through {AMR} codec and {AWGN} channel},
+  booktitle = {IEEE Conference Publication},
+  year      = {2014},
+  note      = {In-band modem (IETF eCall) carrying data through a lossy speech codec. https://ieeexplore.ieee.org/document/6831708}
+}
+
+@article{qamamrwb,
+  author  = {{Various}},
+  title   = {Sensitivity analysis of Quadrature Amplitude Modulation over {AMR-WB} voice codec},
+  year    = {2015},
+  note    = {How a codec designed for speech mangles non-speech modulation. https://www.researchgate.net/publication/292992318}
+}
+
+% -----------------------------------------------------------------------------
+% Acoustic data-over-sound (speaker + microphone, our third target channel)
+% -----------------------------------------------------------------------------
+
+@misc{ggwave,
+  author = {Gerganov, Georgi},
+  title  = {ggwave: Tiny data-over-sound library},
+  year   = {2021},
+  note    = {Multi-frequency FSK + Reed-Solomon; audible & near-ultrasonic profiles (Normal/Fast/Robust/Ultrasonic). Rising chirp for sync, reference tones to learn room distortion. https://github.com/ggerganov/ggwave}
+}
+
+@article{ubicomp2019dataoversound,
+  author  = {{Various}},
+  title   = {Evaluating the user experience of acoustic data transmission},
+  journal = {Personal and Ubiquitous Computing},
+  year    = {2019},
+  note    = {UX/robustness of chirp-style acoustic transmission in real rooms. https://link.springer.com/article/10.1007/s00779-019-01345-7}
+}
+
+@article{tiot2025acoustic,
+  author  = {{Various}},
+  title   = {Evaluating Acoustic Data Transmission Schemes for Ad-Hoc Communication Between Nearby Smart Devices},
+  journal = {ACM Transactions on Internet of Things},
+  year    = {2025},
+  note    = {Comparative evaluation of acoustic PHY schemes across devices/environments. https://dl.acm.org/doi/10.1145/3779439}
+}
+
+@article{dsssofdm_sound,
+  author  = {{Various}},
+  title   = {Multi-user wireless digital communication over sound wave in air by coupling {DSSS-OFDM} for low {SNR} regime},
+  year    = {2024},
+  note    = {Spread-spectrum + OFDM acoustics for poor SNR — relevant to the loudspeaker/mic channel. US Patent 12237864.}
+}
+
+% -----------------------------------------------------------------------------
+% Adaptive links: probing, rate/mode selection, feedback
+% -----------------------------------------------------------------------------
+
+@article{amcreview,
+  author  = {Ansari, et al.},
+  title   = {Adaptive Modulation and Coding: A Brief Review of the Literature},
+  journal = {International Journal on Communications Antenna and Propagation (IRECAP)},
+  year    = {2020},
+  note    = {Survey of MCS selection under time-varying channels. Backs our runtime re-probing/switching. https://www.praiseworthyprize.org/jsm/index.php?journal=irecap&page=article&op=view&path[]=27187}
+}
+
+@article{rl_linkadaptation,
+  author  = {{Various}},
+  title   = {Reinforcement Learning for Efficient and Tuning-Free Link Adaptation},
+  journal = {arXiv:2010.08651},
+  year    = {2020},
+  note    = {Learned outer-loop link adaptation without hand-tuned thresholds. Option for the encoding-switch policy. https://arxiv.org/pdf/2010.08651}
+}
+
+@article{pilotace_ofdm,
+  author  = {{Various}},
+  title   = {Capacity of {MIMO-OFDM} with Pilot-Aided Channel Estimation},
+  journal = {EURASIP Journal on Wireless Communications and Networking},
+  year    = {2007},
+  note    = {Pilot placement/density vs. channel selectivity; the overhead-vs-accuracy trade for probing. https://jwcn-eurasipjournals.springeropen.com/articles/10.1155/2007/32460}
+}
+
+% -----------------------------------------------------------------------------
+% MAC / handshake / negotiation analogues from other media
+% -----------------------------------------------------------------------------
+
+@inproceedings{karn1990maca,
+  author    = {Karn, Phil},
+  title     = {{MACA} — A New Channel Access Method for Packet Radio},
+  booktitle = {ARRL/CRRL Amateur Radio 9th Computer Networking Conference},
+  year      = {1990},
+  note      = {RTS/CTS handshake — model for half-duplex turn-taking and channel reservation.}
+}
+
+@inproceedings{jacobson1988,
+  author    = {Jacobson, Van},
+  title     = {Congestion Avoidance and Control},
+  booktitle = {ACM SIGCOMM},
+  year      = {1988},
+  note      = {Feedback-driven rate adaptation to an unknown, changing path. Design pattern for our runtime rate control.}
+}
+
+% -----------------------------------------------------------------------------
+% Error correction
+% -----------------------------------------------------------------------------
+
+@article{reedsolomon1960,
+  author  = {Reed, Irving S. and Solomon, Gustave},
+  title   = {Polynomial Codes over Certain Finite Fields},
+  journal = {Journal of the Society for Industrial and Applied Mathematics},
+  volume  = {8},
+  number  = {2},
+  pages   = {300--304},
+  year    = {1960},
+  note    = {Block FEC used by ggwave/chirp; baseline for symbol-erasure recovery.}
+}
+
+@inproceedings{luby2002lt,
+  author    = {Luby, Michael},
+  title     = {{LT} Codes},
+  booktitle = {IEEE Symposium on Foundations of Computer Science (FOCS)},
+  year      = {2002},
+  note      = {Rateless/fountain coding — attractive when per-feature reliability is unknown a priori.}
+}
+
+% -----------------------------------------------------------------------------
+% ML speech synthesis (the future "neural head") & covert speech channels
+% -----------------------------------------------------------------------------
+
+@article{wavenet2016,
+  author  = {van den Oord, A{\"a}ron and Dieleman, Sander and Zen, Heiga and others},
+  title   = {{WaveNet}: A Generative Model for Raw Audio},
+  journal = {arXiv:1609.03499},
+  year    = {2016},
+  note    = {Autoregressive neural vocoder; candidate for a speech-imitating head that renders feature arrays as realistic voice.}
+}
+
+@inproceedings{tacotron2,
+  author    = {Shen, Jonathan and Pang, Ruoming and Weiss, Ron J. and others},
+  title     = {Natural {TTS} Synthesis by Conditioning {WaveNet} on Mel Spectrogram Predictions ({Tacotron 2})},
+  booktitle = {IEEE ICASSP},
+  year      = {2018},
+  note    = {Mel-spectrogram intermediate representation — a natural "feature array" boundary for a neural head.}
+}
+
+@misc{codec2,
+  author = {Rowe, David},
+  title  = {Codec 2: Open source low bit-rate speech codec},
+  year   = {2010},
+  note   = {700-3200 bps speech; shows how few parameters (pitch, energy, spectral envelope) reconstruct intelligible voice — a concrete feature set.}
+}
+
+@article{voipstego_survey,
+  author  = {Mazurczyk, Wojciech and Szczypiorski, Krzysztof},
+  title   = {{VoIP} Steganography and Its Detection — A Survey},
+  journal = {ACM Computing Surveys},
+  year    = {2013},
+  note    = {Hiding data inside speech streams/codec parameters; ties the audio track back to airwire's steganographic goals. https://arxiv.org/pdf/1203.4374}
+}
+
+% -----------------------------------------------------------------------------
+% Adjacent covert/constrained-channel systems
+% -----------------------------------------------------------------------------
+
+@article{airhopper2014,
+  author  = {Guri, Mordechai and Kedma, Gabi and Kachlon, Assaf and Elovici, Yuval},
+  title   = {{AirHopper}: Bridging the Air-Gap between Isolated Networks and Mobile Phones using Radio Frequencies},
+  journal = {arXiv:1411.0237},
+  year    = {2014},
+  note    = {Exfiltration over an unintended physical channel — motivates "any medium can carry a protocol". https://arxiv.org/pdf/1411.0237}
+}
+
+@article{sonic2024,
+  author  = {{Various}},
+  title   = {{SONIC}: Connect the Unconnected via {FM} Radio \& {SMS}},
+  journal = {arXiv:2407.01738},
+  year    = {2024},
+  note    = {Delivering data over broadcast/constrained channels to reach offline users — sibling motivation to airwire. https://arxiv.org/pdf/2407.01738}
+}
+
+% -----------------------------------------------------------------------------
+% Semantic channels: linguistic steganography & LLM watermark (ro)bustness
+% (the "channel" is a lossy transform of *meaning*, not a physical medium)
+% -----------------------------------------------------------------------------
+
+@inproceedings{ziegler2019neurallingstego,
+  author    = {Ziegler, Zachary M. and Deng, Yuntian and Rush, Alexander M.},
+  title     = {Neural Linguistic Steganography},
+  booktitle = {Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year      = {2019},
+  note      = {Arithmetic-coding data hiding in LM-generated text — prototype of a "text head" whose features are token choices. arXiv:1909.01496}
+}
+
+@inproceedings{kirchenbauer2023watermark,
+  author    = {Kirchenbauer, John and Geiping, Jonas and Wen, Yuxin and Katz, Jonathan and Miers, Ian and Goldstein, Tom},
+  title     = {A Watermark for Large Language Models},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  year      = {2023},
+  note      = {Green/red-list token biasing to embed a signal in generated text — the closest existing "encode into LLM output" scheme. arXiv:2301.10226}
+}
+
+@inproceedings{krishna2023paraphrase,
+  author    = {Krishna, Kalpesh and Song, Yixiao and Karpinska, Marzena and Wieting, John and Iyyer, Mohit},
+  title     = {Paraphrasing Evades Detectors of {AI}-Generated Text, but Retrieval Is an Effective Defense},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2023},
+  note      = {Paraphrase (DIPPER) as an attack that strips text watermarks — i.e. it *characterises the semantic channel* our text head must survive. arXiv:2303.13408}
+}
+
+@article{kuditipudi2023robust,
+  author  = {Kuditipudi, Rohith and Thickstun, John and Hashimoto, Tatsunori and Liang, Percy},
+  title   = {Robust Distortion-Free Watermarks for Language Models},
+  journal = {arXiv:2307.15593},
+  year    = {2023},
+  note    = {Watermarks designed to survive edits/paraphrase — the "FEC over a semantic channel" problem, stated in watermarking terms.}
+}

@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package airwire;
+
+// The plaintext structure of a hyperchunk header (see sources/chunking.py), before it gets
+// encrypted as a whole with the session's symmetric key. The receiver only learns any of this
+// after decrypting the wire header message.
+message HyperchunkHeader {
+  uint64 hyperchunk_id = 1;      // sequence number of this hyperchunk within its session.
+  uint32 hyperchunk_length = 2;  // length of the encrypted hyperslice ciphertext, in bytes.
+  bytes nonce = 3;                // nonce used to encrypt the hyperslice itself.
+  uint32 chunk_count = 4;         // number of wire chunks the ciphertext was split into.
+  bytes tag = 5;                  // AEAD tag for the hyperslice ciphertext.
+  uint32 chunk_id_size = 6;       // width, in bytes (1-8), of each chunk's chunk ID prefix.
+}
+
+// The plaintext structure of a hyperchunk acknowledgement, before it gets encrypted as a whole.
+message HyperchunkAck {
+  uint64 hyperchunk_id = 1;  // which hyperchunk this acknowledges.
+  bool success = 2;
+}

@@ -3,6 +3,28 @@
 A hybrid messaging application that seamlessly switches between web and SMS transport.
 All messages are stored locally on the user's device — the server acts only as a relay, never persisting message content.
 
+## Project Scope — Two Tracks
+
+This repository hosts two related but separately-paced efforts:
+
+1. **airwire (product track) — this document.** The immediate, buildable goal: encrypt and
+   decrypt **text and images** under a pre-shared key and move them over SMS/MMS. Each payload is
+   sent either as a *raw* encrypted-and-encoded blob, or *steganographically* disguised as benign
+   content — human-like text via Markov chains, or an information-bearing image. Everything below
+   specifies this track.
+
+2. **airwave (research track) — see [`docs/research-proposal.md`](docs/research-proposal.md).**
+   An exploratory research proposal for an adaptive, channel-agnostic protocol that establishes
+   **audio** communication over an *unknown* channel (VoIP, a lossy voice codec, or an open-air
+   speaker+microphone link) — discovering the channel's transmittable features at runtime and
+   adapting its encoding to them. Framing and bibliography only at this stage; no implementation.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the phased implementation plan for this track,
+starting with a platform-independent Python proof of concept of the crypto/framing/obfuscation
+core before any mobile app work begins, and [`docs/design-decisions.md`](docs/design-decisions.md)
+for the record of specific technical trade-offs made along the way, with the reasoning behind
+each.
+
 ## Core Concepts
 
 ### Local-Only Storage
@@ -73,25 +95,27 @@ The entire size-prefixed Protobuf message is sent over a TLS connection.
 
 Fully asynchronous encryption using **X25519** key exchange and **XChaCha20-Poly1305** for symmetric encryption.
 
-- **Service messages** (including data message headers) carry the full asymmetric overhead.
+- **Service messages** (e.g. the initial handshake) carry the full asymmetric overhead.
 - **Data message bodies** are encrypted symmetrically only, to save space.
 
-The message is split into header and body.
-Each chunk is prefixed with the message ID and chunk number.
-Header and body are encrypted separately.
+A data message body is cut into large **hyperslices** (configurable, ~1KB by default), and each
+hyperslice is encrypted as a single AEAD operation — one nonce and tag cover the whole hyperslice,
+not each individual outgoing message. That's what keeps the per-message overhead low; see
+[design decision #1](docs/design-decisions.md#1-minimizing-cryptography-overhead) for the
+reasoning and the numbers behind it. The resulting ciphertext is split into small, message-sized
+**chunks**, each carrying only a cheap sequence number, preceded by one small header message
+(itself encrypted) describing how to reassemble and verify the chunks that follow. The receiver
+acknowledges each hyperslice as a whole (also encrypted); on any failure, the whole hyperslice is
+retried.
 
 ### SMS Size Budget
 
-SMS is limited to 160 ASCII characters (160 bytes). Per-chunk overhead:
-
-| Component                | Size     |
-|--------------------------|----------|
-| Message ID (rolling)     | 4 bytes  |
-| Receiver ID              | 16 bytes |
-| Symmetric encryption tag | 16 bytes |
-| Base64 encoding overhead | 12 bytes |
-| **Total overhead**       | **48 bytes** |
-| **Usable payload**       | **84 bytes** |
+SMS is limited to 160 ASCII characters (160 bytes) per message. The exact overhead per hyperslice
+now depends on the configured hyperslice and chunk sizes rather than a single fixed table — see
+[`core/sources/chunking.py`](core/sources/chunking.py) for the mechanics, and
+[design decision #1](docs/design-decisions.md#1-minimizing-cryptography-overhead) for the current
+numbers with the shipped defaults: roughly 91% of raw bytes sent are message content rather than
+overhead, versus roughly 68% under an earlier, naive per-message encryption scheme.
 
 This constraint means voice notes are realistically transferable over MMS only.
 

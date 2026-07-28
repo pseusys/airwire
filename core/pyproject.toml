@@ -1,0 +1,81 @@
+[project]
+name = "airwire-core"
+version = "0.0.1"
+description = "Platform-independent proof of concept: crypto, message framing and SMS chunking for airwire"
+readme = "README.md"
+requires-python = ">=3.11"
+
+authors = [
+    { name = "pseusys" }
+]
+
+keywords = [
+    "open-source",
+    "sms",
+    "encryption",
+    "messaging"
+]
+
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Communications"
+]
+
+dependencies = [
+    "pynacl~=1.5.0",
+    "protobuf~=6.31"
+]
+
+[project.optional-dependencies]
+devel = [
+    "grpcio-tools~=1.75.1",
+    "pytest~=8.4.2"
+]
+
+codestyle = [
+    "mypy~=1.18.2",
+    "flake8~=7.3.0",
+    "black~=25.9.0",
+    "isort~=6.0.1",
+    "types-protobuf~=6.31"
+]
+
+
+
+# Standalone config:
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+
+
+# Poetry config:
+
+[tool.poetry]
+requires-poetry = ">=2.0"
+
+packages = [
+    { include = "sources" }
+]
+
+[tool.poetry.requires-plugins]
+poethepoet = "^0.34.0"
+
+
+
+# Poe-the-poet config:
+
+[tool.poe]
+default_task_type = "script"
+
+[tool.poe.tasks]
+lint = { script = "scripts.codestyle:lint", help = "Lint all python code: run 'flake8', 'black' and 'mypy'" }
+format = { script = "scripts.codestyle:format", help = "Format all python code: change code formatting where possible (using 'black')" }
+generate = { script = "scripts.process:generate", help = "Generate protobuf source files from sources/proto/*.proto" }
+test = { cmd = "pytest tests", help = "Run the unit test suite" }

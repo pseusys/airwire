@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package airwire;
+
+// Message types, from the README's "Message Format" table.
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_DATA = 1;
+  MESSAGE_TYPE_HANDSHAKE = 2;
+  MESSAGE_TYPE_PRESENCE = 3;
+}
+
+// The message format described in the README's "Message Format" table.
+//
+// In Web mode, the whole envelope is size-prefixed and sent over TLS as-is.
+//
+// In SMS mode, `payload` is what gets sliced into hyperslices, encrypted and chunked for
+// transmission — see `sources/chunking.py` for that wire format. It currently covers the "data
+// message body, symmetric-only" case from the README's Encryption section, not the separate
+// asymmetric header/service-message chunking the README also describes. Note that
+// `sources.chunking`'s wire format doesn't carry `id`/`recipient` itself (see that module's
+// docstring for the resulting scope limits); how those get communicated alongside a hyperchunk
+// transfer is not yet defined.
+message Envelope {
+  bytes id = 1;         // rolling 4-byte message ID
+  string sender = 2;     // sender identifier (phone number)
+  bytes recipient = 3;   // 16-byte receiver ID
+  MessageType type = 4;
+  bytes payload = 5;     // optional message body
+}

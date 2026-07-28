@@ -1,0 +1,13 @@
+# Python:
+
+core/**/__pycache__/
+core/**/*.pyc
+core/.venv/
+core/.mypy_cache/
+core/.pytest_cache/
+core/.poetry/
+core/dist/
+core/*.egg-info/
+core/poetry.lock
+core/sources/proto/*.py
+core/sources/proto/*.pyi
