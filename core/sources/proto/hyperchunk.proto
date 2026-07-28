@@ -2,6 +2,15 @@ syntax = "proto3";
 
 package airwire;
 
+// How hyperslice ciphertext bytes are turned into the bytes that actually travel in wire chunks
+// (see sources/encodings.py). Carried in the (encrypted) header so the receiver knows which
+// inverse to apply without needing it configured out of band, the same way chunk_id_size is.
+enum ChunkEncoding {
+  PLAIN = 0;   // chunk payloads are the raw ciphertext bytes, unmodified.
+  BASE64 = 1;  // chunk payloads are base64 text -- visible, but not plausible as real content.
+  MARKOV = 2;  // chunk payloads are Markov-chain-disguised natural language text. Not implemented yet.
+}
+
 // The plaintext structure of a hyperchunk header (see sources/chunking.py), before it gets
 // encrypted as a whole with the session's symmetric key. The receiver only learns any of this
 // after decrypting the wire header message.
@@ -12,6 +21,7 @@ message HyperchunkHeader {
   uint32 chunk_count = 4;         // number of wire chunks the ciphertext was split into.
   bytes tag = 5;                  // AEAD tag for the hyperslice ciphertext.
   uint32 chunk_id_size = 6;       // width, in bytes (1-8), of each chunk's chunk ID prefix.
+  ChunkEncoding encoding = 7;     // how to turn reassembled chunk payloads back into ciphertext.
 }
 
 // The plaintext structure of a hyperchunk acknowledgement, before it gets encrypted as a whole.

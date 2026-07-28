@@ -34,7 +34,8 @@ dependencies = [
 [project.optional-dependencies]
 devel = [
     "grpcio-tools~=1.75.1",
-    "pytest~=8.4.2"
+    "pytest~=8.4.2",
+    "markovify~=0.9.4"
 ]
 
 codestyle = [
@@ -78,4 +79,27 @@ default_task_type = "script"
 lint = { script = "scripts.codestyle:lint", help = "Lint all python code: run 'flake8', 'black' and 'mypy'" }
 format = { script = "scripts.codestyle:format", help = "Format all python code: change code formatting where possible (using 'black')" }
 generate = { script = "scripts.process:generate", help = "Generate protobuf source files from sources/proto/*.proto" }
+train-stego-model = { script = "scripts.model:train", help = "Download/cache corpora and (re)train frozen per-language Markov text models into sources/data/" }
 test = { cmd = "pytest tests", help = "Run the unit test suite" }
+
+[tool.poe.tasks.demo]
+script = "scripts.demo:run"
+help = "Encrypt + wire-encode a demo message end-to-end and print what happens at each step"
+
+[[tool.poe.tasks.demo.args]]
+name = "text"
+options = ["--text", "-t"]
+default = "Hello, airwire! This is a demo message."
+help = "Plaintext message to encrypt and pack"
+
+[[tool.poe.tasks.demo.args]]
+name = "mode"
+options = ["--mode", "-m"]
+default = "plain"
+help = "Wire chunk encoding to demo: plain, base64"
+
+[[tool.poe.tasks.demo.args]]
+name = "chunk_size"
+options = ["--chunk-size", "-c"]
+type = "integer"
+help = "Wire chunk size in bytes (defaults to chunking.DEFAULT_CHUNK_SIZE)"

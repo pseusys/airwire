@@ -117,3 +117,150 @@ Roughly in order of expected payoff for the effort. Each of these is a candidate
       single lost chunk more expensive to retry (the whole hyperslice resends). A link that's
       dropping chunks could shrink its hyperslice size; a clean link could grow it. Speculative,
       more complex, lower priority than the above.
+
+## 2. Pluggable wire encodings for hyperchunk payloads
+
+**Status:** implemented (raw bytes, base64) —
+[`core/sources/encodings.py`](../core/sources/encodings.py),
+[`core/sources/chunking.py`](../core/sources/chunking.py). Disguised-text encoding not
+implemented yet.
+
+### The gap: chunk payloads were always raw ciphertext
+
+Decision #1 fixed how much crypto overhead a hyperchunk pays. It says nothing about what the
+*chunk payload bytes themselves* look like on the wire — until now, `pack_hyperchunk` always
+emitted the raw ciphertext unmodified, split at fixed byte boundaries. The
+[product README](../README.md#mms-support-premium) commits to disguise strategies beyond that
+(Markov-chain text, image steganography); building the first one meant deciding how it plugs into
+the existing chunk-ID/header/ack/retry machinery, rather than becoming a second, parallel chunking
+implementation.
+
+### The complication: predictable vs. unpredictable expansion
+
+The original packer sliced ciphertext into fixed `usable_per_chunk`-byte pieces because the
+transform was the identity — 1 input byte always became exactly 1 output byte, so
+`chunk_count = ceil(len(ciphertext) / usable_per_chunk)` could be computed directly. That
+arithmetic breaks for any other encoding: base64 has a fixed but non-1:1 ratio (3 input bytes → 4
+output bytes), and a Markov-chain encoding's ratio isn't fixed at all — how many ciphertext bits a
+given generated word represents depends on how many candidate continuations the chain has at that
+point in the walk, which varies word to word.
+
+### The fix: greedy atom-based packing, chosen encoding recorded in the header
+
+`ChunkEncoding` (`sources/encodings.py`) exposes one method, `encode_atoms(data) -> Iterator[bytes]`,
+yielding indivisible output units — one raw byte for `PlainEncoding`, one base64-encoded 3-byte
+group for `Base64Encoding`. `chunking._greedy_pack` walks that iterator and fills each chunk with
+as many whole atoms as fit under the chunk's byte budget, starting a new chunk the moment the next
+atom would overflow it. This works identically regardless of whether the encoding's expansion
+ratio is fixed, and needs no upfront prediction of `chunk_count` — `pack_hyperchunk`'s existing
+fixed-point loop (grow `chunk_id_size` until it's wide enough for the actual chunk count) just
+re-runs the greedy pack at each candidate width instead of a ceiling-division formula, which
+continues to converge for the same reason it always did.
+
+Which encoding was used is now a field on `HyperchunkHeader` (`ChunkEncoding encoding = 7`), so
+`unpack_hyperchunk`/`receive_hyperchunk` can invert it without the caller needing to configure it
+out of band — the same reasoning as `chunk_id_size` living in the header rather than being
+guessed. Since the header is already encrypted end to end (decision #1, iteration 3), recording
+this costs nothing in metadata confidentiality.
+
+### Base64 as a deliberate middle tier
+
+Alongside raw bytes and (eventually) fully disguised text, `Base64Encoding` was added as a third,
+simple option: visible ASCII, but not plausible as an innocuous message on its own — a middle
+ground between "obviously opaque binary" and "meant to pass as an ordinary message." Its atoms are
+always exactly 4 bytes (base64 pads only the final partial group of the whole message, never an
+intermediate one), so it also doubles as a second, simpler exercise of the same greedy-packing
+machinery before the harder Markov-chain encoding gets built on top of it.
+
+### Follow-up
+
+`ChunkEncoding.MARKOV` was reserved in the wire format here but not implemented yet at the time
+this entry was written — see [decision #3](#3-the-markov-chain-text-disguise-encoding) for how it
+was actually built, and the determinism constraint (no floating point, no ML inference, anywhere
+in the encode/decode-critical path) that shaped it.
+
+## 3. The Markov-chain text disguise encoding
+
+**Status:** implemented — [`core/sources/markov.py`](../core/sources/markov.py). English
+(`MARKOV_ENG`) and Russian (`MARKOV_RUS`) both work; only English is wired into
+`unpack_hyperchunk`'s auto-detection (see "Known limitation" below).
+
+### Why not just use an existing entropy-coding library
+
+The obvious-looking plan was [`constriction`](https://pypi.org/project/constriction/): MIT/Apache/
+BSL-1.0 licensed, prebuilt wheels, and documentation that explicitly promises "exactly invertible
+fixed-point arithmetic" — precisely the determinism this needs. It was tried first, hands-on,
+before writing any project code against it.
+
+It didn't work out, for a structural reason rather than a bug: `constriction`'s public API is
+shaped for compressing/decompressing an *already-known* number of symbols (`decoder.decode(model,
+9)` — you tell it how many). This module's actual question is the reverse: *how many words does it
+take to represent this many bytes* — the symbol count is exactly what's unknown going in. Every
+way of coercing `constriction` into answering that (padding the input and hoping the decoder
+tolerates reading past the real data, tracking `RangeEncoder.get_compressed()`'s growth to guess
+when "enough" had been decoded) failed empirically: its `RangeDecoder` doesn't error on the first
+out-of-bounds read, but decoding enough further symbols eventually corrupts its internal state and
+raises an unrecoverable assertion — confirmed directly, not inferred from docs, with padding sizes
+from a few hundred bytes up to many kilobytes, zero-filled and randomly-filled alike. Its own
+`maybe_exhausted()` docs hint at exactly this: "cannot detect end-of-stream in all cases... append
+an end-of-stream sentinel symbol." That sentinel-based idiom fits compressing a message whose
+*symbol* content is already fully known upfront; it doesn't fit this module's shape, where the
+symbols (words) are themselves the output being discovered step by step.
+
+### What was built instead
+
+A small binary arithmetic coder, written from scratch directly against the frozen model's integer
+counts, adapted from the structure of Hernan Moraldo's reference implementation
+([github.com/hmoraldo/markovTextStego](https://github.com/hmoraldo/markovTextStego), previously
+identified as prior art for this feature) — a proven design (its own bundled self-tests pass) that
+already solves the exact-termination problem this needs, by tracking "how many source bits remain"
+as an explicit value it owns, rather than asking an external library to report it:
+
+- A binary interval `[low, high]` (arbitrary-precision Python integers) narrows every time a word
+  is chosen, proportional to that word's share of its Markov state's total corpus-frequency count.
+- The interval widens (gains binary digits) only when the current width can't distinguish all of a
+  state's candidates, and *only ever up to how many real source bits are actually left* — this cap
+  is what makes the walk exactly self-terminating. It never asks for more precision than there is
+  real data to supply it, so it always stops after consuming exactly the right number of bits, with
+  no length prefix or sentinel needed on the wire — `HyperchunkHeader.hyperchunk_length` already
+  carries the target byte count, reused rather than duplicated (see decision #1's whole theme).
+- Whenever `low` and `high` agree on their leading bits, those bits are locked in regardless of
+  what's chosen from here on, and get popped off both the interval and the source-bit cursor —
+  ordinary arithmetic-coding renormalization.
+- Decoding replays the identical walk *forwards* from the same begin state, using each observed
+  word to look up the sub-interval it must have occupied when chosen, and accumulates the same
+  locked-in bits into the output instead of reading them from a cursor.
+
+One deliberate departure from Moraldo's own arithmetic: his version splits each state's range
+proportionally using **floating-point** division (`step = range_size * 1.0 / denominator`). Scalar
+IEEE-754 double arithmetic is actually platform-portable for this — the non-determinism risk
+flagged in decision #1's TODOs is specifically about parallel/vectorized reduction order (GPU
+kernels, SIMD-batched BLAS), which doesn't apply to a single sequential Python float op — but since
+an equally simple **exact-integer** alternative was available (cumulative count scaled by the
+range size, floor-divided: `(cumulative * range_size) // denominator`), that was used instead.
+Zero floating point anywhere in the encode/decode-critical path, not just an argument for why the
+floating point that's there is safe.
+
+Hands-on validation (not just unit tests against the shipped frozen models) covered: round trips
+across byte lengths from 0 to several KB against both a synthetic low-branching-factor model and
+the real per-language frozen chains; determinism (identical input always produces an identical word
+sequence); and that tampering a chosen word either fails closed with a clear error (the word isn't
+a valid continuation at that point in the walk) or silently changes the recovered bytes, which is
+fine — the outer AEAD tag (decision #1) is what actually has to catch tampering, the same
+fail-closed contract every other encoding already relies on.
+
+### Known limitation: no per-hyperchunk language selection
+
+`HyperchunkHeader.encoding` is a single `MARKOV` value shared by every language's model — it
+doesn't say *which* frozen chain was used, only that some Markov-disguised text was. Both
+`MARKOV_ENG` and `MARKOV_RUS` encode and decode correctly on their own, but
+`sources.encodings._ENCODINGS` (what `unpack_hyperchunk` consults for header-driven
+auto-detection) can only map that one identifier to one instance — currently `MARKOV_ENG`. Packing
+with `MARKOV_RUS` and then unpacking through the normal `pack_hyperchunk`/`unpack_hyperchunk` path
+reliably fails, because the receiver ends up walking the English chain against Russian text. This
+was caught by hand-testing the demo script's `--mode` end to end (not by the unit tests, which
+exercise `MarkovEncoding.decode` directly against a matching instance and so never touch the
+registry) — a reminder that a "does the interface round-trip" test and a "does the *wired-together
+system* round-trip" test can pass and fail independently of each other. A real fix needs a
+wire-visible language selector (e.g. a field alongside `encoding` in the header); out of scope for
+this pass, which was about proving the encoding itself works.

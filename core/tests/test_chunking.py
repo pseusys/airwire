@@ -20,6 +20,10 @@ from sources.chunking import (
     unpack_hyperchunk,
 )
 from sources.crypto import Symmetric
+from sources.encodings import BASE64, PLAIN, ChunkEncoding
+from sources.markov import MARKOV_ENG
+
+ALL_ENCODINGS = [PLAIN, BASE64, MARKOV_ENG]
 
 
 # _chunk_id_size:
@@ -56,13 +60,18 @@ def test_slice_hyperslices_rejects_non_positive_size() -> None:
 # pack_hyperchunk / unpack_hyperchunk:
 
 
+@pytest.mark.parametrize("encoding", ALL_ENCODINGS, ids=lambda e: type(e).__name__)
 @pytest.mark.parametrize(
     "hyperslice",
     [b"", b"hi", token_bytes(50), token_bytes(500), token_bytes(DEFAULT_HYPERSLICE_SIZE)],
 )
-def test_pack_unpack_round_trip(hyperslice: bytes) -> None:
+def test_pack_unpack_round_trip_for_every_encoding(hyperslice: bytes, encoding: ChunkEncoding) -> None:
+    """The same pack/unpack loop, run once per registered `ChunkEncoding` -- plain, base64, and
+    the Markov-chain text disguise -- since none of chunking.py's logic is encoding-specific."""
+
     symmetric = Symmetric()
-    messages = pack_hyperchunk(symmetric, hyperslice, hyperchunk_id=7)
+    messages = pack_hyperchunk(symmetric, hyperslice, hyperchunk_id=7, encoding=encoding)
+    # unpack_hyperchunk isn't told the encoding -- it reads it back out of the (encrypted) header.
     hyperchunk_id, plaintext = unpack_hyperchunk(symmetric, messages)
     assert hyperchunk_id == 7
     assert plaintext == hyperslice
@@ -138,6 +147,49 @@ def test_unpack_hyperchunk_fails_closed_on_wrong_key() -> None:
 def test_unpack_hyperchunk_rejects_empty_input() -> None:
     with pytest.raises(ChunkingError):
         unpack_hyperchunk(Symmetric(), [])
+
+
+# pack_hyperchunk / unpack_hyperchunk with a non-default ChunkEncoding:
+
+
+def test_pack_hyperchunk_records_the_chosen_encoding_in_the_header() -> None:
+    symmetric = Symmetric()
+    plain_messages = pack_hyperchunk(symmetric, b"data", hyperchunk_id=0)
+    base64_messages = pack_hyperchunk(symmetric, b"data", hyperchunk_id=0, encoding=BASE64)
+    markov_messages = pack_hyperchunk(symmetric, b"data", hyperchunk_id=0, encoding=MARKOV_ENG)
+    assert _decrypt_header(symmetric, plain_messages[0]).encoding == PLAIN.identifier
+    assert _decrypt_header(symmetric, base64_messages[0]).encoding == BASE64.identifier
+    assert _decrypt_header(symmetric, markov_messages[0]).encoding == MARKOV_ENG.identifier
+
+
+def test_pack_hyperchunk_base64_chunks_are_readable_ascii() -> None:
+    symmetric = Symmetric()
+    messages = pack_hyperchunk(symmetric, token_bytes(200), hyperchunk_id=0, chunk_size=150, encoding=BASE64)
+    for chunk in messages[1:]:
+        payload = chunk[1:]  # 1-byte chunk ID prefix at this chunk_size/chunk_count.
+        assert all(32 <= b < 127 for b in payload), "Base64-encoded chunk payload should be printable ASCII!"
+
+
+def test_pack_hyperchunk_rejects_chunk_size_too_small_for_a_single_base64_atom() -> None:
+    # A base64 atom is always 4 bytes; chunk_size=4 leaves usable_per_chunk=3 even at the minimum
+    # 1-byte chunk ID, which can't fit even one atom.
+    with pytest.raises(ChunkSizeTooSmallError):
+        pack_hyperchunk(Symmetric(), b"data", hyperchunk_id=0, chunk_size=4, encoding=BASE64)
+
+
+def test_send_hyperchunk_forwards_the_encoding_parameter() -> None:
+    symmetric = Symmetric()
+    sent: List[bytes] = []
+
+    def send(message: bytes) -> None:
+        sent.append(message)
+
+    def receive_ack() -> Optional[bytes]:
+        return encode_ack(symmetric, 4, True)
+
+    send_hyperchunk(symmetric, b"secret text", hyperchunk_id=4, send=send, receive_ack=receive_ack, encoding=BASE64)
+
+    assert _decrypt_header(symmetric, sent[0]).encoding == BASE64.identifier
 
 
 # encode_ack / decode_ack:

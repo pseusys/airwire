@@ -11,3 +11,5 @@ core/*.egg-info/
 core/poetry.lock
 core/sources/proto/*.py
 core/sources/proto/*.pyi
+core/.cache/
+core/sources/data/*.json

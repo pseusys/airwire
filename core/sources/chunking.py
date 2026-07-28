@@ -27,6 +27,13 @@ Terminology, and the wire format that comes out of it:
   anything short of a matching, successful ack — a missing chunk, a failed tag, a timeout, a
   garbled or misattributed ack — the sender resends the *entire* hyperchunk (header included) up
   to a configured retry limit.
+- How ciphertext bytes become chunk *payload* bytes is pluggable (`sources/encodings.py`,
+  `ChunkEncoding`) -- raw bytes by default, but also base64 or (in the future) Markov-chain-
+  disguised text. The chosen encoding is recorded in the (encrypted) header so the receiver can
+  invert it without needing it configured out of band. Packing works the same way regardless of
+  encoding: `_greedy_pack` fills each chunk with as many whole encoded "atoms" as fit, which is
+  necessary because an encoding's output length per unit of input isn't always predictable ahead
+  of time (a disguised-text encoding's word lengths, for instance).
 
 Scope and open questions, worth a second look independently of this module:
 
@@ -52,7 +59,11 @@ from secrets import token_bytes
 from typing import Callable, Dict, List, Optional, Tuple
 
 from sources.crypto import Symmetric
+from sources.encodings import PLAIN, ChunkEncoding, encoding_by_identifier, register
+from sources.markov import MARKOV_ENG
 from sources.proto import hyperchunk_pb2
+
+register(MARKOV_ENG)
 
 DEFAULT_HYPERSLICE_SIZE = 1024
 DEFAULT_CHUNK_SIZE = 120  # matches the raw-byte budget of a 160-character base64-encoded SMS.
@@ -101,7 +112,34 @@ def slice_hyperslices(plaintext: bytes, hyperslice_size: int = DEFAULT_HYPERSLIC
     return [plaintext[i : i + hyperslice_size] for i in range(0, len(plaintext), hyperslice_size)] or [b""]
 
 
-def pack_hyperchunk(symmetric: Symmetric, hyperslice: bytes, hyperchunk_id: int, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[bytes]:
+def _greedy_pack(encoding: ChunkEncoding, data: bytes, budget: int) -> List[bytes]:
+    """
+    Split `encoding.encode_atoms(data)`'s output into `budget`-bounded pieces, greedily: keep
+    appending whole atoms to the piece under construction until the next one would overflow it,
+    then start a new piece. Works regardless of how many output bytes a given atom represents in
+    input-byte terms, which isn't fixed or predictable in advance for every encoding.
+    """
+
+    pieces: List[bytes] = []
+    current = bytearray()
+    for atom in encoding.encode_atoms(data):
+        if len(atom) > budget:
+            raise ChunkSizeTooSmallError(f"A single {type(encoding).__name__} atom is {len(atom)} bytes, which doesn't fit a budget of {budget}!")
+        if current and len(current) + len(atom) > budget:
+            pieces.append(bytes(current))
+            current = bytearray()
+        current.extend(atom)
+    pieces.append(bytes(current))
+    return pieces
+
+
+def pack_hyperchunk(
+    symmetric: Symmetric,
+    hyperslice: bytes,
+    hyperchunk_id: int,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    encoding: ChunkEncoding = PLAIN,
+) -> List[bytes]:
     """Encrypt one hyperslice and split it into wire messages: `[header, chunk_0, chunk_1, ...]`."""
 
     nonce = token_bytes(Symmetric.nonce_size)
@@ -113,15 +151,13 @@ def pack_hyperchunk(symmetric: Symmetric, hyperslice: bytes, hyperchunk_id: int,
         usable_per_chunk = chunk_size - chunk_id_size
         if usable_per_chunk <= 0:
             raise ChunkSizeTooSmallError(f"chunk_size ({chunk_size}) leaves no room for payload once a {chunk_id_size}-byte chunk ID is subtracted!")
-        chunk_count = max(1, -(-len(ciphertext) // usable_per_chunk))
-        required_size = _chunk_id_size(chunk_count)
+        pieces = _greedy_pack(encoding, ciphertext, usable_per_chunk)
+        required_size = _chunk_id_size(len(pieces))
         if required_size <= chunk_id_size:
             break
         if chunk_id_size >= MAX_CHUNK_ID_SIZE:
-            raise MessageTooLargeError(f"Hyperslice needs {chunk_count} chunks, which doesn't fit even an {MAX_CHUNK_ID_SIZE}-byte chunk ID!")
+            raise MessageTooLargeError(f"Hyperslice needs {len(pieces)} chunks, which doesn't fit even an {MAX_CHUNK_ID_SIZE}-byte chunk ID!")
         chunk_id_size = required_size
-
-    pieces = [ciphertext[i : i + usable_per_chunk] for i in range(0, len(ciphertext), usable_per_chunk)] or [b""]
 
     header = hyperchunk_pb2.HyperchunkHeader(
         hyperchunk_id=hyperchunk_id,
@@ -130,6 +166,7 @@ def pack_hyperchunk(symmetric: Symmetric, hyperslice: bytes, hyperchunk_id: int,
         chunk_count=len(pieces),
         tag=tag,
         chunk_id_size=chunk_id_size,
+        encoding=encoding.identifier,
     )
     header_message = symmetric.encrypt(header.SerializeToString())
     if len(header_message) > chunk_size:
@@ -145,6 +182,10 @@ def _decrypt_header(symmetric: Symmetric, header_message: bytes) -> hyperchunk_p
     header.ParseFromString(plaintext)
     if not (MIN_CHUNK_ID_SIZE <= header.chunk_id_size <= MAX_CHUNK_ID_SIZE):
         raise ChunkingError(f"Hyperchunk header declares an invalid chunk ID width: {header.chunk_id_size}!")
+    try:
+        encoding_by_identifier(header.encoding)
+    except ValueError as error:
+        raise ChunkingError(str(error)) from error
     return header
 
 
@@ -160,7 +201,12 @@ def _reassemble(symmetric: Symmetric, header: hyperchunk_pb2.HyperchunkHeader, c
     if missing:
         raise IncompleteMessageError(f"Missing chunk indices: {missing}!")
 
-    ciphertext = b"".join(parsed[index] for index in range(header.chunk_count))
+    encoded = b"".join(parsed[index] for index in range(header.chunk_count))
+    try:
+        ciphertext = encoding_by_identifier(header.encoding).decode(encoded, header.hyperchunk_length)
+    except ValueError as error:
+        raise ChunkingError(f"Failed to decode reassembled chunk payload: {error}!") from error
+
     if len(ciphertext) != header.hyperchunk_length:
         raise ChunkingError(f"Reassembled ciphertext is {len(ciphertext)} bytes, header declared {header.hyperchunk_length}!")
 
@@ -223,6 +269,7 @@ def send_hyperchunk(
     receive_ack: Callable[[], Optional[bytes]],
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     max_retries: int = DEFAULT_MAX_RETRIES,
+    encoding: ChunkEncoding = PLAIN,
 ) -> None:
     """
     Send one hyperslice as hyperchunk `hyperchunk_id`, retrying the whole hyperchunk (header
@@ -231,7 +278,7 @@ def send_hyperchunk(
     are all treated as failure. Raises `HyperchunkDeliveryError` once retries are exhausted.
     """
 
-    messages = pack_hyperchunk(symmetric, hyperslice, hyperchunk_id, chunk_size)
+    messages = pack_hyperchunk(symmetric, hyperslice, hyperchunk_id, chunk_size, encoding)
 
     attempt = 0
     while True:
