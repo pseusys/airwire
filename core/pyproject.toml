@@ -96,7 +96,7 @@ help = "Plaintext message to encrypt and pack"
 name = "mode"
 options = ["--mode", "-m"]
 default = "plain"
-help = "Wire chunk encoding to demo: plain, base64"
+help = "Wire chunk encoding to demo: plain, base64, markov"
 
 [[tool.poe.tasks.demo.args]]
 name = "chunk_size"

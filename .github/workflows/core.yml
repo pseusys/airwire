@@ -1,0 +1,92 @@
+name: core
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "core/**"
+      - ".github/workflows/core.yml"
+  pull_request:
+    paths:
+      - "core/**"
+      - ".github/workflows/core.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: core
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install "poetry>=2.0"
+
+      - name: Install dependencies
+        run: poetry install --all-extras
+
+      - name: Generate protobuf sources
+        run: poetry poe generate
+
+      - name: Lint
+        run: poetry poe lint
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: pip install "poetry>=2.0"
+
+      - name: Install dependencies
+        run: poetry install --all-extras
+
+      - name: Generate protobuf sources
+        run: poetry poe generate
+
+      # The Tatoeba corpora are ~150MB combined and fetched from an external site (sources/corpus.py)
+      # -- cached so a normal run only pays for the network round trip once per corpus/model logic
+      # change, not on every CI run.
+      - name: Cache Tatoeba corpora
+        uses: actions/cache@v4
+        with:
+          path: core/.cache
+          key: corpus-${{ hashFiles('core/sources/corpus.py', 'core/scripts/model.py') }}
+          restore-keys: |
+            corpus-
+
+      - name: Train Markov text-disguise models
+        run: poetry poe train-stego-model
+
+      - name: Run test suite
+        run: poetry poe test
+
+      - name: "Example invocation: demo (plain)"
+        run: poetry poe demo --mode plain --text "Continuous integration example run (plain)."
+
+      - name: "Example invocation: demo (base64)"
+        run: poetry poe demo --mode base64 --text "Continuous integration example run (base64)."
+
+      - name: "Example invocation: demo (markov)"
+        run: poetry poe demo --mode markov --text "Continuous integration example run (markov)."
