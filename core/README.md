@@ -38,13 +38,22 @@ against — before any platform-specific work starts.
   ciphertext as plausible sentences by walking the frozen chain above, using a from-scratch,
   pure-integer arithmetic coder (not a general-purpose entropy-coding library -- see the module's
   docstring for why `constriction` was tried and rejected, and
-  [design decision #2](../docs/design-decisions.md) for the full story) so encode/decode agree
-  byte-for-byte on any device, with no floating point or ML inference anywhere in that path. Two
-  language instances exist (`MARKOV_ENG`, `MARKOV_RUS`), but only `MARKOV_ENG` is registered for
-  the header-driven auto-detection `unpack_hyperchunk` relies on -- see the module's docstring for
-  why, and what a real fix would need.
+  [design decision #3](../docs/design-decisions.md#3-the-markov-chain-text-disguise-encoding) for
+  the full story) so encode/decode agree byte-for-byte on any device, with no floating point or ML
+  inference anywhere in that path. Two language instances exist (`MARKOV_ENG`, `MARKOV_RUS`), but
+  only `MARKOV_ENG` is registered for the header-driven auto-detection `unpack_hyperchunk` relies
+  on -- see the module's docstring for why, and what a real fix would need.
 
 Image steganography is not started yet — see the roadmap.
+
+## CI
+
+[`.github/workflows/core.yml`](../.github/workflows/core.yml) runs on every push to `main` and
+every pull request touching `core/`: a `lint` job (`poetry poe lint`), and a `test` job (matrix
+over Python 3.11/3.12) that trains the stego model and runs both `poetry poe test` and three
+example invocations of `poetry poe demo` (one per implemented mode) as a live smoke test, not just
+the unit suite. The Tatoeba corpus download is cached between runs since it's an external
+network dependency otherwise paid on every run.
 
 ## Setup
 

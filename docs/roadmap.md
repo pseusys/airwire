@@ -34,9 +34,11 @@ Checked against existing prior art before scoping the phases below:
 
 ## Phase 0 — Core engine PoC (Python, no app)
 
-**Status: in progress.** Crypto and chunking are implemented and tested in [`core/`](../core/);
-steganographic encoders are not started yet. Every non-obvious technical choice made along the
-way — and there have been several — is logged in
+**Status: in progress, mostly done.** Crypto, chunking, and the Markov-chain text disguise encoder
+are implemented and tested in [`core/`](../core/), with CI ([`.github/workflows/core.yml`](../.github/workflows/core.yml))
+running the full test suite plus example invocations on every push and pull request. Image
+steganography is the one piece of the original scope not started yet. Every non-obvious technical
+choice made along the way — and there have been several — is logged in
 [`docs/design-decisions.md`](./design-decisions.md) as it happens, rather than only living in
 code comments.
 
@@ -55,21 +57,44 @@ The deliverable is a small, well-tested Python package implementing the wire-lev
   overhead — preceded by an encrypted header and followed by a stop-and-wait
   acknowledgement/retry exchange. See
   [design decision #1](./design-decisions.md#1-minimizing-cryptography-overhead) for why, and the
-  concrete overhead numbers versus the fixed-budget design it replaced.
-- **Obfuscation encoders** — Markov-chain text disguise and image steganography, each as an
-  independent encode/decode module (`Pillow` + `numpy` for image; a plain n-gram model, no ML
-  dependency needed, for text).
+  concrete overhead numbers versus the fixed-budget design it replaced. How chunk payload bytes are
+  represented on the wire is itself pluggable (`ChunkEncoding`: raw bytes, base64, or
+  Markov-chain-disguised text) — see
+  [design decision #2](./design-decisions.md#2-pluggable-wire-encodings-for-hyperchunk-payloads).
+- **Obfuscation encoders** — of the two originally scoped, one is done and one isn't:
+  - *Markov-chain text disguise* (done) — ciphertext bytes are mapped to plausible-looking
+    sentences, word choice driven by a frozen per-language Markov chain trained from real corpora
+    ([`sources/corpus.py`](../core/sources/corpus.py), [`scripts/model.py`](../core/scripts/model.py))
+    and a from-scratch, pure-integer arithmetic coder — no floating point, no ML inference anywhere
+    in the encode/decode path. See
+    [design decision #3](./design-decisions.md#3-the-markov-chain-text-disguise-encoding) for why a
+    general-purpose entropy-coding library didn't fit this problem and what was built instead.
+    English and Russian corpora both work; only English is currently wired into the automatic
+    wire-format detection `unpack_hyperchunk` relies on (documented limitation, not a bug).
+  - *Image steganography* (not started) — the only remaining gap in Phase 0. Likely simpler than
+    the text case in one sense (the README's own bar is "looks like noise," which AEAD ciphertext
+    already does, not "looks like a real photo" — no training or corpus needed), but open on
+    architecture: an image file's internal structure (headers, checksums, compression) means it
+    probably can't be split across many small SMS-sized `ChunkEncoding` pieces the way raw
+    bytes/base64/Markov text can — it may need its own delivery shape (one hyperslice → one MMS
+    attachment) rather than a fourth `ChunkEncoding` implementation. Worth deciding before writing
+    code.
 - **Test strategy** — `pytest` round trips for: encrypt→chunk→reassemble→decrypt,
-  encrypt→stego-encode→stego-decode→decrypt, and tamper detection (corrupted auth tag must fail
-  closed). No device needed anywhere in this phase.
-- **Bonus, low-cost extension:** this PoC becomes the source of *cross-implementation test
-  vectors* — encrypt with Python, assert the future Kotlin/Swift client decrypts it correctly, and
-  vice versa. Cheap insurance against the mobile port silently drifting from the proven design.
-- Optional: a minimal Python relay-server stub (single process, in-memory) to de-risk the
-  delivery-status/timeout/retry state machine the same way, before Phase 2.
+  encrypt→stego-encode→stego-decode→decrypt (done for the Markov encoder, pending for images), and
+  tamper detection (corrupted auth tag must fail closed). No device needed anywhere in this phase,
+  and CI now runs all of it automatically on every push/PR.
+- **Bonus, low-cost extension (not started):** this PoC becomes the source of
+  *cross-implementation test vectors* — encrypt with Python, assert the future Kotlin/Swift client
+  decrypts it correctly, and vice versa. Cheap insurance against the mobile port silently drifting
+  from the proven design.
+- Optional (not started): a minimal Python relay-server stub (single process, in-memory) to
+  de-risk the delivery-status/timeout/retry state machine the same way, before Phase 2.
 
-**Exit criterion:** a stranger can `pip install` the package, run the test suite, and trust the
-protocol is sound — before a single line of Kotlin exists.
+**Exit criterion:** a stranger can clone the repo, run `poetry install --all-extras` (Poetry, not
+bare `pip` — the package needs the generated protobuf sources and the trained stego models, not
+just its runtime dependencies), and run the test suite to trust the protocol is sound — before a
+single line of Kotlin exists. CI enforces exactly this sequence on every push and pull request now,
+so this is a verified fact rather than an aspiration.
 
 ## Phase 1 — Android-native client
 
