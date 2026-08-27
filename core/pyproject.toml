@@ -28,7 +28,9 @@ classifiers = [
 
 dependencies = [
     "pynacl~=1.5.0",
-    "protobuf~=6.31"
+    "protobuf~=6.31",
+    "numpy~=2.4.6",
+    "pillow~=12.3.0"
 ]
 
 [project.optional-dependencies]
@@ -96,10 +98,43 @@ help = "Plaintext message to encrypt and pack"
 name = "mode"
 options = ["--mode", "-m"]
 default = "plain"
-help = "Wire chunk encoding to demo: plain, base64, markov"
+help = "plain, base64, markov, markov_rus, value_noise, voronoi, reaction_diffusion, or attractor"
+
+[[tool.poe.tasks.demo.args]]
+name = "header_mode"
+options = ["--header-mode"]
+help = "Same choices as --mode; disguises the header message too (default: left as a plain encrypted blob)"
 
 [[tool.poe.tasks.demo.args]]
 name = "chunk_size"
 options = ["--chunk-size", "-c"]
 type = "integer"
-help = "Wire chunk size in bytes (defaults to chunking.DEFAULT_CHUNK_SIZE)"
+help = "Wire chunk size in bytes (defaults to an SMS- or MMS-scale budget depending on --mode)"
+
+[[tool.poe.tasks.demo.args]]
+name = "image_path"
+options = ["--image-path"]
+default = "output.png"
+help = "Where to save the synthesized image; image-synthesis modes only"
+
+[tool.poe.tasks.demo-handshake]
+script = "scripts.demo:run_handshake"
+help = "Run docs/handshake.md's session-establishment design end to end and print each phase"
+
+[[tool.poe.tasks.demo-handshake.args]]
+name = "text"
+options = ["--text", "-t"]
+default = "Hello, this went through a real handshake!"
+help = "Plaintext message to send once the session key is established"
+
+[[tool.poe.tasks.demo-handshake.args]]
+name = "alice_id"
+options = ["--alice-id"]
+default = "+15551234567"
+help = "Sender-side platform identifier (determines Alice's own obfuscation mode)"
+
+[[tool.poe.tasks.demo-handshake.args]]
+name = "bob_id"
+options = ["--bob-id"]
+default = "+15559876543"
+help = "Receiver-side platform identifier (determines Bob's own obfuscation mode)"

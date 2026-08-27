@@ -1,4 +1,4 @@
-# Python:
+# Python (core/):
 
 core/**/__pycache__/
 core/**/*.pyc
@@ -8,8 +8,36 @@ core/.pytest_cache/
 core/.poetry/
 core/dist/
 core/*.egg-info/
-core/poetry.lock
 core/sources/proto/*.py
 core/sources/proto/*.pyi
 core/.cache/
 core/sources/data/*.json
+core/*.svg
+core/*.png
+
+# TypeScript (web-demo/):
+
+web-demo/node_modules/
+web-demo/dist/
+web-demo/.angular/
+web-demo/public/models/*.json
+web-demo/coverage/
+web-demo/out-tsc/
+
+# Editors and IDEs (repo-wide):
+
+**/.idea/
+**/.project
+**/.classpath
+**/.c9/
+**/*.launch
+**/.settings/
+**/*.sublime-workspace
+**/.history/*
+
+**/.vscode/
+
+# System files:
+
+**/.DS_Store
+**/Thumbs.db

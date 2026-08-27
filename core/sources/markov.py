@@ -54,21 +54,18 @@ Known limitations, worth a second look independently of this module:
   as ordinary punctuation. Correct and unambiguous, but an obvious tell to a human reader; a nicer
   rendering (e.g. a period) is a follow-up, not attempted here to avoid the risk of it colliding
   with a genuine one-character vocabulary word.
-- Only one `MarkovEncoding` instance is registered under the shared `ChunkEncoding.MARKOV`
-  identifier for header-driven auto-detection on the receiving end (see `sources/encodings.py`),
-  since the wire format doesn't carry a language tag -- both ends must already agree on the
-  language out of band, the same way they already agree on the symmetric key. Both `MARKOV_ENG`
-  and `MARKOV_RUS` work correctly end to end (`encode_atoms`/`decode` are fully functional for
-  either), but only `MARKOV_ENG` is in `sources.encodings._ENCODINGS`, so `unpack_hyperchunk`
-  won't automatically pick the Russian model even if that's what was actually used to pack a
-  hyperchunk. A real fix needs a wire-visible language selector, not attempted here.
+- Resolved: `MARKOV_ENG` and `MARKOV_RUS` each have their own `ChunkEncoding` identifier
+  (`hyperchunk.proto`), so the header-driven auto-detection in `unpack_hyperchunk` picks the
+  correct language on its own -- no more out-of-band agreement needed than any other encoding
+  choice already requires. This also unblocked `sources/handshake.py`'s obfuscation-mode
+  derivation, which needs to select a *specific* language/flavor, not just "some Markov text."
 """
 
-import math
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterator, List, Tuple
 
+from sources.arithmetic import BitAccumulator, BitCursor, candidate_ranges, common_leading_bits, strip_top_bits
 from sources.encodings import ChunkEncoding
 from sources.proto import hyperchunk_pb2
 
@@ -117,114 +114,41 @@ def _next_state(state: _State, word: str, begin_state: _State) -> _State:
     return begin_state if word == END_TOKEN else state[1:] + (word,)
 
 
-def _add_digits_to_range(low: int, high: int, width: int, desired_range_len: int, max_digits: int) -> Tuple[int, int, int]:
-    range_possible_values = high - low + 1
-    if desired_range_len <= range_possible_values:
-        return low, high, width
-    extra = math.ceil(math.log2(desired_range_len / range_possible_values))
-    if width + extra > max_digits:
-        extra = max_digits - width
-    if extra <= 0:
-        return low, high, width
-    return low << extra, (high << extra) | ((1 << extra) - 1), width + extra
-
-
-def _word_ranges(low: int, high: int, width: int, candidates: _Candidates, budget: int) -> Tuple[List[Tuple[str, int, int]], int, int, int]:
-    """Subdivide `[low, high]` (a `width`-bit range) among `candidates`, proportionally to their
-    integer counts, growing the range (up to `budget` bits) first if it isn't wide enough to give
-    every candidate at least one position -- candidates that still don't fit even then are simply
-    unreachable at this step. Pure integer arithmetic throughout: no floating point anywhere."""
-
-    denominator = sum(count for _, count in candidates)
-    low, high, width = _add_digits_to_range(low, high, width, denominator, budget)
-    range_size = high - low + 1
-    base = low
-
-    boundaries: List[Tuple[str, int]] = []
-    cumulative = 0
-    for word, count in candidates:
-        cumulative += count
-        boundaries.append((word, (cumulative * range_size) // denominator - 1))
-    last_word, _ = boundaries[-1]
-    boundaries[-1] = (last_word, range_size - 1)  # force the exact top, guards against floor-division shortfall.
-
-    result = []
-    cursor = 0
-    for word, end in boundaries:
-        if end >= cursor:
-            result.append((word, cursor + base, end + base))
-            cursor = end + 1
-    return result, low, high, width
-
-
-def _common_leading_bits(low: int, high: int, width: int) -> int:
-    count = 0
-    while width - count >= 1 and (low >> (width - count - 1)) & 1 == (high >> (width - count - 1)) & 1:
-        count += 1
-    return count
-
-
-def _strip_top_bits(low: int, high: int, width: int, n: int) -> Tuple[int, int, int]:
-    if n >= width:
-        return 0, 0, 0
-    mask = (1 << (width - n)) - 1
-    return low & mask, high & mask, width - n
-
-
-def _top_bits(value: int, width: int, n: int) -> int:
-    if n == 0:
-        return 0
-    return (value >> (width - n)) & ((1 << n) - 1)
-
-
-class _BitCursor:
-    """Reads a fixed byte buffer as a peekable/consumable bit stream, MSB-first."""
-
-    def __init__(self, data: bytes) -> None:
-        self._value = int.from_bytes(data, "big")
-        self._total = len(data) * 8
-        self._pos = 0
-
-    def remaining(self) -> int:
-        return self._total - self._pos
-
-    def peek(self, n: int) -> int:
-        if n == 0:
-            return 0
-        shift = self._total - self._pos - n
-        return (self._value >> shift) & ((1 << n) - 1)
-
-    def consume(self, n: int) -> None:
-        self._pos += n
+_IDENTIFIERS = {
+    "eng": hyperchunk_pb2.ChunkEncoding.MARKOV_ENG,
+    "rus": hyperchunk_pb2.ChunkEncoding.MARKOV_RUS,
+}
 
 
 class MarkovEncoding(ChunkEncoding):
-    identifier = hyperchunk_pb2.ChunkEncoding.MARKOV
-
     def __init__(self, language: str) -> None:
+        try:
+            self.identifier = _IDENTIFIERS[language]
+        except KeyError:
+            raise MarkovModelError(f"No wire identifier registered for language {language!r}; supported: {sorted(_IDENTIFIERS)}!") from None
         self.language = language
 
-    def encode_atoms(self, data: bytes) -> Iterator[bytes]:
+    def encode_atoms(self, data: bytes, nonce: bytes) -> Iterator[bytes]:
         state_size, chain = _load_model(self.language)
         begin_state: _State = (BEGIN_TOKEN,) * state_size
-        cursor = _BitCursor(data)
+        cursor = BitCursor(data)
         low, high, width = 0, 1, 1
         state = begin_state
 
         while cursor.remaining() > 0:
             budget = cursor.remaining()
             candidates = _candidates_for(chain, state)
-            ranges, low, high, width = _word_ranges(low, high, width, candidates, budget)
+            ranges, low, high, width = candidate_ranges(low, high, width, candidates, budget)
             peeked = cursor.peek(width)
             word, low, high = next((w, lo, hi) for w, lo, hi in ranges if lo <= peeked <= hi)
             yield (word + " ").encode("utf-8")
             state = _next_state(state, word, begin_state)
-            common = _common_leading_bits(low, high, width)
+            common = common_leading_bits(low, high, width)
             if common:
                 cursor.consume(min(common, cursor.remaining()))
-                low, high, width = _strip_top_bits(low, high, width, common)
+                low, high, width = strip_top_bits(low, high, width, common)
 
-    def decode(self, encoded: bytes, length: int) -> bytes:
+    def decode(self, encoded: bytes, length: int, nonce: bytes) -> bytes:
         state_size, chain = _load_model(self.language)
         begin_state: _State = (BEGIN_TOKEN,) * state_size
 
@@ -233,33 +157,26 @@ class MarkovEncoding(ChunkEncoding):
         except UnicodeDecodeError as error:
             raise ValueError(f"Markov-encoded chunk payload isn't valid UTF-8: {error}!") from error
 
-        target_bits = length * 8
-        out_value = 0
-        out_bits = 0
+        accumulator = BitAccumulator(length)
         low, high, width = 0, 1, 1
         state = begin_state
 
         for word in words:
-            if out_bits >= target_bits:
+            if accumulator.done():
                 break
-            budget = target_bits - out_bits
             candidates = _candidates_for(chain, state)
-            ranges, low, high, width = _word_ranges(low, high, width, candidates, budget)
+            ranges, low, high, width = candidate_ranges(low, high, width, candidates, accumulator.remaining())
             match = next(((lo, hi) for w, lo, hi in ranges if w == word), None)
             if match is None:
                 raise ValueError(f"{word!r} is not a valid continuation at this point in the Markov walk!")
             low, high = match
             state = _next_state(state, word, begin_state)
-            common = _common_leading_bits(low, high, width)
+            common = common_leading_bits(low, high, width)
             if common:
-                take = min(common, target_bits - out_bits)
-                out_value = (out_value << take) | _top_bits(low, width, take)
-                out_bits += take
-                low, high, width = _strip_top_bits(low, high, width, common)
+                accumulator.append(low, width, common)
+                low, high, width = strip_top_bits(low, high, width, common)
 
-        if out_bits != target_bits:
-            raise ValueError(f"Markov-encoded chunk payload only decodes to {out_bits}/{target_bits} bits!")
-        return out_value.to_bytes(length, "big") if length else b""
+        return accumulator.finish()
 
 
 MARKOV_ENG = MarkovEncoding("eng")

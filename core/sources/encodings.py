@@ -11,9 +11,8 @@ advance, only how to recognize when the *next* atom would overflow the chunk it'
 filling; see `chunking._greedy_pack`.
 
 Currently implemented: `PlainEncoding` (raw bytes, the original design) and `Base64Encoding` (a
-visible-but-not-plausible middle ground between raw binary and a future fully-disguised text
-encoding). `ChunkEncoding.MARKOV` is reserved in the wire format (`hyperchunk.proto`) but has no
-implementation yet.
+visible-but-not-plausible middle ground between raw binary and a fully-disguised encoding). See
+`sources/markov.py` and `sources/synthesis.py` for the text and image disguise encodings.
 """
 
 from abc import ABC, abstractmethod
@@ -27,18 +26,24 @@ class ChunkEncoding(ABC):
     identifier: hyperchunk_pb2.ChunkEncoding
 
     @abstractmethod
-    def encode_atoms(self, data: bytes) -> Iterator[bytes]:
-        """Yield indivisible output atoms that, concatenated in order, encode all of `data`."""
+    def encode_atoms(self, data: bytes, nonce: bytes) -> Iterator[bytes]:
+        """
+        Yield indivisible output atoms that, concatenated in order, encode all of `data`. `nonce`
+        is the hyperslice's own AEAD nonce (already unique and transmitted regardless of encoding)
+        -- most encodings ignore it, same as most ignore `length` on `decode` below, but one that
+        needs an arbitrary per-message seed (`sources/synthesis.py`'s image encoding, for its
+        source-texture choice) can derive it from here for free rather than needing a new field.
+        """
 
     @abstractmethod
-    def decode(self, encoded: bytes, length: int) -> bytes:
+    def decode(self, encoded: bytes, length: int, nonce: bytes) -> bytes:
         """
         Invert the concatenation of every atom `encode_atoms` would have produced for some
-        original data of `length` bytes. `length` comes from the hyperchunk header, which already
-        carries it for reassembly validation regardless of encoding -- most encodings are
-        self-delimiting and can ignore it, but one that can't tell where its own output ends
-        without an external length (a Markov-chain walk, for instance, since the number of words
-        needed isn't fixed) needs it to know when to stop.
+        original data of `length` bytes, encoded with the same `nonce`. `length` comes from the
+        hyperchunk header, which already carries it for reassembly validation regardless of
+        encoding -- most encodings are self-delimiting and can ignore it, but one that can't tell
+        where its own output ends without an external length (a Markov-chain walk, for instance,
+        since the number of words needed isn't fixed) needs it to know when to stop.
         """
 
 
@@ -47,11 +52,11 @@ class PlainEncoding(ChunkEncoding):
 
     identifier = hyperchunk_pb2.ChunkEncoding.PLAIN
 
-    def encode_atoms(self, data: bytes) -> Iterator[bytes]:
+    def encode_atoms(self, data: bytes, nonce: bytes) -> Iterator[bytes]:
         for byte in data:
             yield bytes((byte,))
 
-    def decode(self, encoded: bytes, length: int) -> bytes:
+    def decode(self, encoded: bytes, length: int, nonce: bytes) -> bytes:
         return encoded
 
 
@@ -63,11 +68,11 @@ class Base64Encoding(ChunkEncoding):
 
     identifier = hyperchunk_pb2.ChunkEncoding.BASE64
 
-    def encode_atoms(self, data: bytes) -> Iterator[bytes]:
+    def encode_atoms(self, data: bytes, nonce: bytes) -> Iterator[bytes]:
         for i in range(0, len(data), 3):
             yield b64encode(data[i : i + 3])
 
-    def decode(self, encoded: bytes, length: int) -> bytes:
+    def decode(self, encoded: bytes, length: int, nonce: bytes) -> bytes:
         return b64decode(encoded, validate=True)
 
 

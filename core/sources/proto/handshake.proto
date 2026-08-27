@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package airwire;
+
+// The plaintext structure of a handshake certificate (see docs/handshake.md and
+// sources/handshake.py), before it gets encrypted as a whole with the sender's derived bootstrap
+// key. Deliberately unsigned (plain TOFU, no persistent identity to pin) -- see docs/handshake.md
+// for the security properties this does and doesn't provide.
+message Certificate {
+  string sender = 1;               // sender's platform-specific transport identifier.
+  bytes ephemeral_public_key = 2;  // this conversation's fresh X25519 public key.
+}

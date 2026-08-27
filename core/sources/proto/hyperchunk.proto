@@ -5,10 +5,21 @@ package airwire;
 // How hyperslice ciphertext bytes are turned into the bytes that actually travel in wire chunks
 // (see sources/encodings.py). Carried in the (encrypted) header so the receiver knows which
 // inverse to apply without needing it configured out of band, the same way chunk_id_size is.
+//
+// Every disguise variant (each Markov language, each texture flavor) gets its own identifier,
+// rather than sharing one per family -- this is what lets the receiver auto-detect which variant
+// was actually used purely from the header, and what lets sources/handshake.py's obfuscation-mode
+// derivation pick a specific variant deterministically. New variants must be appended, never
+// inserted or renumbered -- see docs/handshake.md's obfuscation-pool ordering note.
 enum ChunkEncoding {
-  PLAIN = 0;   // chunk payloads are the raw ciphertext bytes, unmodified.
-  BASE64 = 1;  // chunk payloads are base64 text -- visible, but not plausible as real content.
-  MARKOV = 2;  // chunk payloads are Markov-chain-disguised natural language text. Not implemented yet.
+  PLAIN = 0;                          // chunk payloads are the raw ciphertext bytes, unmodified.
+  BASE64 = 1;                         // chunk payloads are base64 text -- visible, not plausible.
+  MARKOV_ENG = 2;                     // chunk payloads are Markov-chain-disguised English text.
+  MARKOV_RUS = 3;                     // chunk payloads are Markov-chain-disguised Russian text.
+  SYNTHESIS_VALUE_NOISE = 4;          // chunk payload is one value-noise-textured PNG image.
+  SYNTHESIS_VORONOI = 5;              // chunk payload is one Voronoi-textured PNG image.
+  SYNTHESIS_REACTION_DIFFUSION = 6;   // chunk payload is one reaction-diffusion-textured PNG image.
+  SYNTHESIS_ATTRACTOR = 7;            // chunk payload is one chaotic-attractor-textured PNG image.
 }
 
 // The plaintext structure of a hyperchunk header (see sources/chunking.py), before it gets

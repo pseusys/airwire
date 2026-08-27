@@ -25,6 +25,10 @@ core before any mobile app work begins, and [`docs/design-decisions.md`](docs/de
 for the record of specific technical trade-offs made along the way, with the reasoning behind
 each.
 
+> **Note:** [`web-demo/README.md`](web-demo/README.md) documents a small standalone Angular page
+> that showcases both disguise mechanisms (text and image) in a browser. It is not part of the
+> product itself — see that file for its deliberately narrow scope.
+
 ## Core Concepts
 
 ### Local-Only Storage
@@ -95,7 +99,8 @@ The entire size-prefixed Protobuf message is sent over a TLS connection.
 
 Fully asynchronous encryption using **X25519** key exchange and **XChaCha20-Poly1305** for symmetric encryption.
 
-- **Service messages** (e.g. the initial handshake) carry the full asymmetric overhead.
+- **Service messages** (e.g. the initial handshake — see [`docs/handshake.md`](docs/handshake.md)
+  for the full session-establishment design) carry the full asymmetric overhead.
 - **Data message bodies** are encrypted symmetrically only, to save space.
 
 A data message body is cut into large **hyperslices** (configurable, ~1KB by default), and each
