@@ -1,0 +1,136 @@
+from pathlib import Path
+from secrets import token_bytes
+
+import numpy as np
+import pytest
+
+from sources import synthesis
+from sources.textures import value_noise
+
+SAMPLES = [b"", b"\x00", b"\xff", token_bytes(1), token_bytes(20), token_bytes(150)]
+
+
+@pytest.fixture(scope="module")
+def texture() -> np.ndarray:
+    return value_noise(64, seed=1)
+
+
+@pytest.mark.parametrize("data", SAMPLES)
+def test_round_trip(data: bytes, texture: np.ndarray) -> None:
+    canvas = synthesis.encode(data, texture)
+    recovered = synthesis.decode(canvas, texture, len(data))
+    assert recovered == data
+
+
+def test_encode_is_deterministic(texture: np.ndarray) -> None:
+    data = token_bytes(50)
+    first = synthesis.encode(data, texture)
+    second = synthesis.encode(data, texture)
+    assert np.array_equal(first, second)
+
+
+def test_different_inputs_produce_different_canvases(texture: np.ndarray) -> None:
+    a = synthesis.encode(token_bytes(50), texture)
+    b = synthesis.encode(token_bytes(50), texture)
+    assert not np.array_equal(a, b)
+
+
+def test_canvas_is_rectangular_and_correct_width(texture: np.ndarray) -> None:
+    canvas = synthesis.encode(token_bytes(37), texture)
+    assert canvas.shape[1] == synthesis.DEFAULT_CANVAS_WIDTH * synthesis.DEFAULT_PATCH_SIZE
+    assert canvas.shape[0] % synthesis.DEFAULT_PATCH_SIZE == 0
+
+
+def test_empty_data_produces_a_single_seed_row(texture: np.ndarray) -> None:
+    canvas = synthesis.encode(b"", texture)
+    assert canvas.shape[0] == synthesis.DEFAULT_PATCH_SIZE
+
+
+def test_decode_rejects_a_patch_not_in_the_library(texture: np.ndarray) -> None:
+    data = token_bytes(30)
+    canvas = synthesis.encode(data, texture)
+    tampered = canvas.copy()
+    # Corrupt one pixel inside the first gap row (patch-row index 1) so it no longer matches
+    # anything in the source texture's patch library.
+    tampered[synthesis.DEFAULT_PATCH_SIZE, 0, 0] ^= 0xFF
+    with pytest.raises(ValueError):
+        synthesis.decode(tampered, texture, len(data))
+
+
+def test_patch_library_rejects_non_square_texture() -> None:
+    bad = np.zeros((32, 40, 3), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        synthesis.PatchLibrary(bad, patch_size=8)
+
+
+def test_patch_library_rejects_size_not_a_multiple_of_patch_size() -> None:
+    bad = np.zeros((30, 30, 3), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        synthesis.PatchLibrary(bad, patch_size=8)
+
+
+def test_patch_library_rejects_too_uniform_a_texture() -> None:
+    flat = np.full((32, 32, 3), 128, dtype=np.uint8)
+    with pytest.raises(ValueError):
+        synthesis.PatchLibrary(flat, patch_size=8)
+
+
+def test_svg_export_contains_expected_structure(texture: np.ndarray) -> None:
+    canvas = synthesis.encode(token_bytes(20), texture)
+    svg = synthesis.to_svg(canvas)
+    assert svg.startswith("<svg")
+    assert "<defs>" in svg
+    assert "<use href=" in svg
+    assert "data:image/png;base64," in svg
+
+
+def test_save_svg_writes_a_file(tmp_path: Path, texture: np.ndarray) -> None:
+    canvas = synthesis.encode(token_bytes(20), texture)
+    path = tmp_path / "out.svg"
+    synthesis.save_svg(canvas, str(path))
+    assert path.read_text(encoding="utf-8").startswith("<svg")
+
+
+def test_canvas_to_png_round_trips_bit_exact(texture: np.ndarray) -> None:
+    png_bytes = synthesis._canvas_to_png(texture)
+    recovered = synthesis._png_to_canvas(png_bytes)
+    assert np.array_equal(texture, recovered)
+
+
+@pytest.mark.parametrize("data", SAMPLES)
+def test_image_encoding_round_trip(data: bytes) -> None:
+    nonce = token_bytes(24)
+    atoms = list(synthesis.SYNTHESIS_VALUE_NOISE.encode_atoms(data, nonce))
+    assert len(atoms) == 1, "ImageEncoding should yield exactly one atom -- the whole image."
+    recovered = synthesis.SYNTHESIS_VALUE_NOISE.decode(atoms[0], len(data), nonce)
+    assert recovered == data
+
+
+def test_image_encoding_atom_is_a_valid_png() -> None:
+    atom = next(synthesis.SYNTHESIS_VALUE_NOISE.encode_atoms(token_bytes(30), token_bytes(24)))
+    assert atom[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_image_encoding_seed_is_derived_from_nonce() -> None:
+    data = token_bytes(30)
+    atom_a = next(synthesis.SYNTHESIS_VALUE_NOISE.encode_atoms(data, token_bytes(24)))
+    atom_b = next(synthesis.SYNTHESIS_VALUE_NOISE.encode_atoms(data, token_bytes(24)))
+    assert atom_a != atom_b, "Different nonces should (almost certainly) synthesize different images."
+
+
+def test_image_encoding_same_nonce_is_deterministic() -> None:
+    data = token_bytes(30)
+    nonce = token_bytes(24)
+    atom_a = next(synthesis.SYNTHESIS_VALUE_NOISE.encode_atoms(data, nonce))
+    atom_b = next(synthesis.SYNTHESIS_VALUE_NOISE.encode_atoms(data, nonce))
+    assert atom_a == atom_b
+
+
+def test_all_four_texture_flavors_have_distinct_identifiers() -> None:
+    identifiers = {
+        synthesis.SYNTHESIS_VALUE_NOISE.identifier,
+        synthesis.SYNTHESIS_VORONOI.identifier,
+        synthesis.SYNTHESIS_REACTION_DIFFUSION.identifier,
+        synthesis.SYNTHESIS_ATTRACTOR.identifier,
+    }
+    assert len(identifiers) == 4

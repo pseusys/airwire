@@ -5,12 +5,16 @@ import pytest
 
 from sources.chunking import (
     DEFAULT_HYPERSLICE_SIZE,
+    DEFAULT_MMS_CHUNK_SIZE,
+    HEADER_PLAINTEXT_SIZE,
     ChunkingError,
     ChunkSizeTooSmallError,
     HyperchunkDeliveryError,
     IncompleteMessageError,
     _chunk_id_size,
     _decrypt_header,
+    _pad_header,
+    _unpad_header,
     decode_ack,
     encode_ack,
     pack_hyperchunk,
@@ -22,6 +26,7 @@ from sources.chunking import (
 from sources.crypto import Symmetric
 from sources.encodings import BASE64, PLAIN, ChunkEncoding
 from sources.markov import MARKOV_ENG
+from sources.synthesis import SYNTHESIS_VALUE_NOISE
 
 ALL_ENCODINGS = [PLAIN, BASE64, MARKOV_ENG]
 
@@ -335,3 +340,92 @@ def test_send_and_receive_hyperchunk_over_a_lossy_channel() -> None:
 
     send_hyperchunk(symmetric, plaintext_to_send, hyperchunk_id=11, send=send, receive_ack=receive_ack, max_retries=1)
     assert received_plaintext == [plaintext_to_send]
+
+
+# pack_hyperchunk / unpack_hyperchunk with an image ChunkEncoding:
+
+
+def test_pack_unpack_round_trip_with_image_encoding() -> None:
+    symmetric = Symmetric()
+    plaintext = b"a hyperslice small enough to embed in one small texture image"
+    messages = pack_hyperchunk(symmetric, plaintext, hyperchunk_id=7, chunk_size=DEFAULT_MMS_CHUNK_SIZE, encoding=SYNTHESIS_VALUE_NOISE)
+    assert len(messages) == 2, "Image encoding should yield exactly one atom -- [header, one image chunk]."
+    hyperchunk_id, recovered = unpack_hyperchunk(symmetric, messages)
+    assert hyperchunk_id == 7
+    assert recovered == plaintext
+
+
+def test_image_encoding_chunk_is_a_valid_png() -> None:
+    symmetric = Symmetric()
+    messages = pack_hyperchunk(symmetric, b"data", hyperchunk_id=0, chunk_size=DEFAULT_MMS_CHUNK_SIZE, encoding=SYNTHESIS_VALUE_NOISE)
+    chunk_id_size = _decrypt_header(symmetric, messages[0]).chunk_id_size
+    payload = messages[1][chunk_id_size:]
+    assert payload[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_pack_hyperchunk_rejects_mms_payload_over_an_sms_chunk_size() -> None:
+    with pytest.raises(ChunkSizeTooSmallError):
+        pack_hyperchunk(Symmetric(), b"data", hyperchunk_id=0, encoding=SYNTHESIS_VALUE_NOISE)
+
+
+# header_encoding (disguising the header itself):
+
+
+def test_pad_unpad_header_round_trip() -> None:
+    for raw in [b"", b"x", b"a" * (HEADER_PLAINTEXT_SIZE - 1)]:
+        assert _unpad_header(_pad_header(raw)) == raw
+
+
+def test_pad_header_rejects_oversized_input() -> None:
+    with pytest.raises(ChunkingError):
+        _pad_header(b"x" * HEADER_PLAINTEXT_SIZE)
+
+
+@pytest.mark.parametrize("header_encoding", [MARKOV_ENG, SYNTHESIS_VALUE_NOISE], ids=lambda e: type(e).__name__)
+def test_pack_unpack_round_trip_with_disguised_header(header_encoding: ChunkEncoding) -> None:
+    symmetric = Symmetric()
+    plaintext = b"a message whose header should not look like raw ciphertext"
+    messages = pack_hyperchunk(symmetric, plaintext, hyperchunk_id=3, chunk_size=DEFAULT_MMS_CHUNK_SIZE, header_encoding=header_encoding)
+    hyperchunk_id, recovered = unpack_hyperchunk(symmetric, messages, header_encoding=header_encoding)
+    assert hyperchunk_id == 3
+    assert recovered == plaintext
+
+
+def test_disguised_header_is_not_raw_ciphertext() -> None:
+    symmetric = Symmetric()
+    plain_messages = pack_hyperchunk(symmetric, b"data", hyperchunk_id=0, chunk_size=DEFAULT_MMS_CHUNK_SIZE)
+    disguised_messages = pack_hyperchunk(symmetric, b"data", hyperchunk_id=0, chunk_size=DEFAULT_MMS_CHUNK_SIZE, header_encoding=MARKOV_ENG)
+    assert disguised_messages[0][:8] != plain_messages[0][:8]
+    # A Markov-disguised header should decode as plausible UTF-8 text; raw ciphertext generally won't.
+    disguised_messages[0].decode("utf-8")
+
+
+def test_disguised_header_fails_to_decode_without_the_matching_header_encoding() -> None:
+    symmetric = Symmetric()
+    messages = pack_hyperchunk(symmetric, b"data", hyperchunk_id=0, chunk_size=DEFAULT_MMS_CHUNK_SIZE, header_encoding=MARKOV_ENG)
+    with pytest.raises((ChunkingError, ValueError)):
+        unpack_hyperchunk(symmetric, messages)  # header_encoding=None, doesn't match how it was packed.
+
+
+def test_receive_hyperchunk_works_with_disguised_header() -> None:
+    symmetric = Symmetric()
+    messages = pack_hyperchunk(symmetric, b"hello", hyperchunk_id=9, chunk_size=DEFAULT_MMS_CHUNK_SIZE, header_encoding=SYNTHESIS_VALUE_NOISE)
+    plaintext, ack = receive_hyperchunk(symmetric, messages, header_encoding=SYNTHESIS_VALUE_NOISE)
+    assert plaintext == b"hello"
+    assert ack is not None
+
+
+def test_send_hyperchunk_forwards_header_encoding() -> None:
+    symmetric = Symmetric()
+    sent: List[bytes] = []
+
+    def send(message: bytes) -> None:
+        sent.append(message)
+
+    def receive_ack() -> Optional[bytes]:
+        return encode_ack(symmetric, 4, True)
+
+    send_hyperchunk(symmetric, b"secret text", hyperchunk_id=4, send=send, receive_ack=receive_ack, chunk_size=DEFAULT_MMS_CHUNK_SIZE, header_encoding=MARKOV_ENG)
+
+    header = _decrypt_header(symmetric, sent[0], header_encoding=MARKOV_ENG)
+    assert header.hyperchunk_id == 4

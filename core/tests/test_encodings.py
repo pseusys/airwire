@@ -1,31 +1,34 @@
+from secrets import token_bytes
+
 import pytest
 
 from sources.encodings import BASE64, PLAIN, Base64Encoding, PlainEncoding, encoding_by_identifier
 
 SAMPLES = [b"", b"a", b"ab", b"abc", b"abcd", b"Hello, world! This is a test." * 5]
+NONCE = token_bytes(24)  # PLAIN/BASE64 ignore it; only encodings that need a seed (e.g. images) use it.
 
 
 @pytest.mark.parametrize("data", SAMPLES)
 def test_plain_round_trip(data: bytes) -> None:
-    encoded = b"".join(PLAIN.encode_atoms(data))
+    encoded = b"".join(PLAIN.encode_atoms(data, NONCE))
     assert encoded == data
-    assert PLAIN.decode(encoded, len(data)) == data
+    assert PLAIN.decode(encoded, len(data), NONCE) == data
 
 
 @pytest.mark.parametrize("data", SAMPLES)
 def test_base64_round_trip(data: bytes) -> None:
-    encoded = b"".join(BASE64.encode_atoms(data))
-    assert BASE64.decode(encoded, len(data)) == data
+    encoded = b"".join(BASE64.encode_atoms(data, NONCE))
+    assert BASE64.decode(encoded, len(data), NONCE) == data
 
 
 def test_base64_atoms_are_all_four_bytes() -> None:
-    for atom in BASE64.encode_atoms(b"Hello, world!"):
+    for atom in BASE64.encode_atoms(b"Hello, world!", NONCE):
         assert len(atom) == 4
 
 
 def test_base64_decode_rejects_malformed_input() -> None:
     with pytest.raises(ValueError):
-        BASE64.decode(b"not valid base64!!", 10)
+        BASE64.decode(b"not valid base64!!", 10, NONCE)
 
 
 def test_encoding_by_identifier_resolves_known_encodings() -> None:
