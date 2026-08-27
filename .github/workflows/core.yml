@@ -90,3 +90,12 @@ jobs:
 
       - name: "Example invocation: demo (markov)"
         run: poetry poe demo --mode markov --text "Continuous integration example run (markov)."
+
+      - name: "Example invocation: demo (markov_rus, disguised header)"
+        run: poetry poe demo --mode markov_rus --header-mode markov_rus --text "Continuous integration example run (markov_rus)."
+
+      - name: "Example invocation: demo (image steganography, disguised header)"
+        run: poetry poe demo --mode voronoi --header-mode value_noise --text "Continuous integration example run (voronoi)."
+
+      - name: "Example invocation: demo-handshake"
+        run: poetry poe demo-handshake --text "Continuous integration example run (handshake)."

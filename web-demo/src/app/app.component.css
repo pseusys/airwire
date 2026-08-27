@@ -1,0 +1,202 @@
+:host {
+  display: block;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #1b1b1f;
+  background: #fafafa;
+  min-height: 100vh;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+header h1 {
+  font-size: 1.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.blurb {
+  color: #444;
+  line-height: 1.5;
+}
+
+.blurb a {
+  color: #2a5db0;
+}
+
+.scope-note {
+  background: #fff4e0;
+  border: 1px solid #e8c98a;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  color: #6b4e10;
+  line-height: 1.5;
+}
+
+.scope-note code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+
+.mode-switch {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.mode-switch button {
+  background: #eceef3;
+  color: #333;
+}
+
+.mode-switch button.active {
+  background: #2a5db0;
+  color: #fff;
+}
+
+button.secondary {
+  background: #eceef3;
+  color: #333;
+}
+
+button.secondary:hover {
+  background: #dde1ea;
+}
+
+.seed-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.seed-row input[type='number'] {
+  flex: 1;
+}
+
+input[type='number'],
+input[type='file'] {
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.obfuscated-image {
+  display: block;
+  max-width: 100%;
+  image-rendering: pixelated;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin: 0.5rem 0;
+}
+
+.download-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  color: #2a5db0;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.download-link:hover {
+  text-decoration: underline;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e2e2e6;
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.panel h2 {
+  font-size: 1.05rem;
+  margin: 0 0 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.field span {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.field textarea,
+.field select {
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  resize: vertical;
+}
+
+button {
+  background: #2a5db0;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #a9b8d1;
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  background: #1f4a8f;
+}
+
+.stat {
+  font-size: 0.85rem;
+  color: #555;
+  margin: 0.5rem 0;
+}
+
+.stat.match {
+  color: #1a7f3c;
+  font-weight: 600;
+}
+
+.stat.mismatch {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.hint {
+  font-size: 0.78rem;
+  color: #888;
+  margin-top: 0.5rem;
+}
+
+.error {
+  color: #b3261e;
+  background: #fdecea;
+  border: 1px solid #f3c1bd;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.revealed {
+  font-size: 1rem;
+  background: #f2f4f8;
+  border-radius: 6px;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

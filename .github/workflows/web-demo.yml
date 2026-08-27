@@ -1,0 +1,102 @@
+name: web-demo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web-demo/**"
+      - "core/sources/corpus.py"
+      - "core/scripts/model.py"
+      - ".github/workflows/web-demo.yml"
+  pull_request:
+    paths:
+      - "web-demo/**"
+      - "core/sources/corpus.py"
+      - "core/scripts/model.py"
+      - ".github/workflows/web-demo.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # web-demo has no code dependency on core/'s Python package -- it only needs the frozen
+      # per-language Markov models core/ trains, so this job builds just enough of core/ to
+      # produce those (see sources/handshake.md and web-demo/README.md for why the two are
+      # independent implementations of the same mechanism, not one calling the other).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install "poetry>=2.0"
+
+      - name: Install core dependencies
+        working-directory: core
+        run: poetry install --all-extras
+
+      - name: Generate protobuf sources
+        working-directory: core
+        run: poetry poe generate
+
+      # Same cache key as .github/workflows/core.yml's equivalent step, deliberately -- both
+      # workflows can share one warm cache instead of each paying the ~150MB download separately.
+      - name: Cache Tatoeba corpora
+        uses: actions/cache@v4
+        with:
+          path: core/.cache
+          key: corpus-${{ hashFiles('core/sources/corpus.py', 'core/scripts/model.py') }}
+          restore-keys: |
+            corpus-
+
+      - name: Train Markov text-disguise models
+        working-directory: core
+        run: poetry poe train-stego-model
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web-demo/package-lock.json
+
+      - name: Install web-demo dependencies
+        working-directory: web-demo
+        run: npm ci
+
+      # GitHub Pages serves a project (non-<user>.github.io) repo at /<repo-name>/, not /, so the
+      # app needs to know its own base path to resolve asset and route URLs correctly.
+      - name: Build
+        working-directory: web-demo
+        run: npm run sync-models && npx ng build --base-href "/${{ github.event.repository.name }}/"
+
+      - name: Run unit tests
+        working-directory: web-demo
+        run: npx ng test --watch=false --browsers=ChromeHeadless
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web-demo/dist/web-demo/browser
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

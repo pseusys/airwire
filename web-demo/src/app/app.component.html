@@ -1,0 +1,173 @@
+<div class="page">
+  <header>
+    <h1>airwire obfuscation demo</h1>
+    <p class="blurb">
+      A message never looks like ciphertext on the wire &mdash; it's disguised as something
+      ordinary instead: plausible-looking sentences, or a patterned image. Both use the same trick
+      underneath: an <strong>arithmetic coder run backwards</strong>, turning random-looking bits
+      into a sequence of weighted choices, and back again.
+      See <a href="https://github.com/pseusys/airwire/blob/main/core/README.md#how-the-steganography-works" target="_blank" rel="noopener">core/README.md</a>
+      for the full explanation.
+    </p>
+    <p class="scope-note">
+      This page showcases only the disguise mechanism: message bytes in, disguised output out, and
+      back. There is <strong>no encryption, no chunking, no handshake</strong> here &mdash; those
+      live in the real Python protocol (<code>core/</code>). What you type below is fed to the
+      encoder exactly as you typed it, not as ciphertext.
+    </p>
+    <div class="mode-switch">
+      <button [class.active]="disguiseType() === 'text'" (click)="disguiseType.set('text')">Text (Markov chain)</button>
+      <button [class.active]="disguiseType() === 'image'" (click)="disguiseType.set('image')">Image (texture synthesis)</button>
+    </div>
+  </header>
+
+  @if (disguiseType() === 'text') {
+    <section class="panel">
+      <h2>1. Message</h2>
+      <label class="field">
+        <span>Language</span>
+        <select [ngModel]="language()" (ngModelChange)="language.set($event)">
+          <option value="eng">English</option>
+          <option value="rus">Russian</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Plaintext message</span>
+        <textarea rows="3" [ngModel]="message()" (ngModelChange)="message.set($event)"></textarea>
+      </label>
+      <p class="stat">{{ messageByteLength() }} bytes (UTF-8)</p>
+      <button (click)="obfuscate()" [disabled]="obfuscating() || messageByteLength() === 0">
+        {{ obfuscating() ? 'Loading model & obfuscating…' : 'Obfuscate →' }}
+      </button>
+      @if (obfuscateError()) {
+        <p class="error">{{ obfuscateError() }}</p>
+      }
+      <p class="hint">
+        First run downloads the frozen per-language model ({{ language() === 'eng' ? '~3.5MB' : '~7.5MB' }}) &mdash;
+        the same trained file the real Python encoder uses, cached by your browser afterward.
+      </p>
+    </section>
+
+    @if (obfuscatedText()) {
+      <section class="panel">
+        <h2>2. Obfuscated representation</h2>
+        <label class="field">
+          <span>Disguised text (edit it, then hit Reveal, to see tamper-detection fail closed)</span>
+          <textarea rows="6" [ngModel]="obfuscatedText()" (ngModelChange)="obfuscatedText.set($event)"></textarea>
+        </label>
+        <p class="stat">
+          {{ originalByteLength() }} bytes → {{ obfuscatedByteLength() }} bytes of text
+          ({{ (originalByteLength() / obfuscatedByteLength() * 100).toFixed(1) }}% raw-byte density)
+        </p>
+        <button (click)="reveal()" [disabled]="revealing() || !obfuscatedText()">
+          {{ revealing() ? 'Revealing…' : '← Reveal' }}
+        </button>
+        @if (revealError()) {
+          <p class="error">Failed to reveal: {{ revealError() }}</p>
+        }
+      </section>
+    }
+
+    @if (revealedText() !== null) {
+      <section class="panel">
+        <h2>3. Revealed message</h2>
+        <p class="revealed">{{ revealedText() }}</p>
+        <p class="stat" [class.match]="revealedText() === message()" [class.mismatch]="revealedText() !== message()">
+          {{ revealedText() === message() ? '✓ Matches the original message exactly.' : '✗ Does not match the original message.' }}
+        </p>
+      </section>
+    }
+  }
+
+  @if (disguiseType() === 'image') {
+    <section class="panel">
+      <h2>1. Message</h2>
+      <label class="field">
+        <span>Texture flavor</span>
+        <select [ngModel]="imageFlavor()" (ngModelChange)="imageFlavor.set($event)">
+          @for (flavor of imageFlavors; track flavor) {
+            <option [value]="flavor">{{ flavor }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>Seed</span>
+        <span class="seed-row">
+          <input type="number" [ngModel]="imageSeed()" (ngModelChange)="imageSeed.set($event)" />
+          <button type="button" class="secondary" (click)="randomizeImageSeed()">Randomize</button>
+        </span>
+      </label>
+      <label class="field">
+        <span>Plaintext message</span>
+        <textarea rows="3" [ngModel]="imageMessage()" (ngModelChange)="imageMessage.set($event)"></textarea>
+      </label>
+      <p class="stat">{{ imageByteLength() }} bytes (UTF-8)</p>
+      <button (click)="obfuscateImage()" [disabled]="imageObfuscating() || imageByteLength() === 0">
+        {{ imageObfuscating() ? 'Synthesizing…' : 'Obfuscate →' }}
+      </button>
+      @if (imageObfuscateError()) {
+        <p class="error">{{ imageObfuscateError() }}</p>
+      }
+      <p class="hint">reaction_diffusion and attractor synthesize the source texture itself first (a few hundred ms) before embedding your message into it.</p>
+    </section>
+
+    @if (obfuscatedImageUrl()) {
+      <section class="panel">
+        <h2>2. Obfuscated representation</h2>
+        <img class="obfuscated-image" [src]="obfuscatedImageUrl()" alt="Synthesized cover image" />
+        <p class="stat">{{ obfuscatedImage()?.width }}×{{ obfuscatedImage()?.height }} px PNG</p>
+        <a class="download-link" [href]="obfuscatedImageUrl()" download="obfuscated.png">⭳ Download PNG</a>
+      </section>
+    }
+
+    <section class="panel">
+      <h2>3. Reveal</h2>
+      <p class="hint">
+        By default this reveals the image generated above. Upload a PNG instead (e.g. one you
+        downloaded earlier) to reveal <em>that</em> one -- you'll need to know the flavor, seed and
+        byte length it was created with, the same way the real protocol would need the header that
+        carries this metadata (deliberately absent here, see the scope note above).
+      </p>
+      <label class="field">
+        <span>Image to reveal</span>
+        <input type="file" accept="image/png" (change)="onImageFileSelected($event)" />
+      </label>
+      @if (uploadedImageUrl()) {
+        <img class="obfuscated-image" [src]="uploadedImageUrl()" alt="Uploaded image" />
+        <button type="button" class="secondary" (click)="clearUploadedImage()">Use the generated image instead</button>
+      }
+      <label class="field">
+        <span>Texture flavor</span>
+        <select [ngModel]="revealFlavor()" (ngModelChange)="revealFlavor.set($event)">
+          @for (flavor of imageFlavors; track flavor) {
+            <option [value]="flavor">{{ flavor }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>Seed</span>
+        <input type="number" [ngModel]="revealSeed()" (ngModelChange)="revealSeed.set($event)" />
+      </label>
+      <label class="field">
+        <span>Original message length (bytes)</span>
+        <input type="number" [ngModel]="revealLength()" (ngModelChange)="revealLength.set($event)" />
+      </label>
+      <button (click)="revealImage()" [disabled]="imageRevealing()">
+        {{ imageRevealing() ? 'Revealing…' : '← Reveal' }}
+      </button>
+      @if (imageRevealError()) {
+        <p class="error">Failed to reveal: {{ imageRevealError() }}</p>
+      }
+    </section>
+
+    @if (revealedImageText() !== null) {
+      <section class="panel">
+        <h2>4. Revealed message</h2>
+        <p class="revealed">{{ revealedImageText() }}</p>
+        <p class="stat" [class.match]="revealedImageText() === imageMessage()" [class.mismatch]="revealedImageText() !== imageMessage()">
+          {{ revealedImageText() === imageMessage() ? '✓ Matches the original message exactly.' : 'Does not match the message typed above (expected if you uploaded a different image).' }}
+        </p>
+      </section>
+    }
+  }
+</div>
