@@ -1,0 +1,15 @@
+name: airwire_medium
+description: Medium contract and Odnoklassniki wrapper for airwire.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.6.0
+resolution: workspace
+
+dependencies:
+  http: ^1.2.0
+  crypto: ^3.0.3
+  hive: ^2.2.3
+
+dev_dependencies:
+  test: ^1.25.0
