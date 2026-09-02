@@ -1,0 +1,24 @@
+name: airwire_app
+description: Airwire Flutter Web prototype shell.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.6.0
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_bloc: ^8.1.0
+  airwire_medium:
+    path: ../medium
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  bloc_test: ^9.1.0
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
