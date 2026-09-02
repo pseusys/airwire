@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:airwire_medium/airwire_medium.dart';
@@ -113,5 +114,165 @@ void main() {
       httpClient: mockClient,
     );
     expect(medium.maxMessageSize, equals(4096));
+  });
+
+  group('OdnoklassnikiMedium.receive / pollOnce', () {
+    test('yields a new message from a chat with an unseen entry', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/graph/me') {
+          return http.Response(jsonEncode({'uid': 'me-1'}), 200);
+        }
+        if (request.url.path == '/graph/me/chats') {
+          return http.Response(
+            jsonEncode({
+              'chats': [
+                {
+                  'chat_id': 'chat:abc123',
+                  'participants': {'user:me-1': 1000, 'user:peer-1': 1000},
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/graph/me/messages') {
+          expect(request.url.queryParameters['chat_id'], equals('chat:abc123'));
+          return http.Response(
+            jsonEncode({
+              'messages': [
+                {
+                  'sender': {'user_id': 'user:peer-1'},
+                  'message': {'text': 'hi from peer', 'mid': 'mid:1'},
+                  'timestamp': 5000,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      });
+
+      final medium = await OdnoklassnikiMedium.authenticate(
+        accessToken: 'token-1',
+        httpClient: mockClient,
+      );
+
+      final events = <(String, String)>[];
+      final subscription = medium.receive().listen(events.add);
+      await medium.pollOnce();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, equals([('peer-1', 'hi from peer')]));
+
+      await subscription.cancel();
+      medium.dispose();
+    });
+
+    test('does not re-yield a message already seen in an earlier poll', () async {
+      var messagesRequestCount = 0;
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/graph/me') {
+          return http.Response(jsonEncode({'uid': 'me-1'}), 200);
+        }
+        if (request.url.path == '/graph/me/chats') {
+          return http.Response(
+            jsonEncode({
+              'chats': [
+                {
+                  'chat_id': 'chat:abc123',
+                  'participants': {'user:me-1': 1000, 'user:peer-1': 1000},
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/graph/me/messages') {
+          messagesRequestCount++;
+          return http.Response(
+            jsonEncode({
+              'messages': [
+                {
+                  'sender': {'user_id': 'user:peer-1'},
+                  'message': {'text': 'hi from peer', 'mid': 'mid:1'},
+                  'timestamp': 5000,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      });
+
+      final medium = await OdnoklassnikiMedium.authenticate(
+        accessToken: 'token-1',
+        httpClient: mockClient,
+      );
+
+      final events = <(String, String)>[];
+      final subscription = medium.receive().listen(events.add);
+      await medium.pollOnce();
+      await medium.pollOnce();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(messagesRequestCount, equals(2));
+      expect(events, equals([('peer-1', 'hi from peer')]));
+
+      await subscription.cancel();
+      medium.dispose();
+    });
+
+    test('ignores messages sent by myself', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/graph/me') {
+          return http.Response(jsonEncode({'uid': 'me-1'}), 200);
+        }
+        if (request.url.path == '/graph/me/chats') {
+          return http.Response(
+            jsonEncode({
+              'chats': [
+                {
+                  'chat_id': 'chat:abc123',
+                  'participants': {'user:me-1': 1000, 'user:peer-1': 1000},
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/graph/me/messages') {
+          return http.Response(
+            jsonEncode({
+              'messages': [
+                {
+                  'sender': {'user_id': 'user:me-1'},
+                  'message': {'text': 'my own message', 'mid': 'mid:1'},
+                  'timestamp': 5000,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      });
+
+      final medium = await OdnoklassnikiMedium.authenticate(
+        accessToken: 'token-1',
+        httpClient: mockClient,
+      );
+
+      final events = <(String, String)>[];
+      final subscription = medium.receive().listen(events.add);
+      await medium.pollOnce();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, isEmpty);
+
+      await subscription.cancel();
+      medium.dispose();
+    });
   });
 }

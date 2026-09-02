@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+
+import 'medium.dart';
 
 class OdnoklassnikiApiException implements Exception {
   OdnoklassnikiApiException(this.message);
@@ -17,7 +20,7 @@ class OdnoklassnikiApiException implements Exception {
 ///
 /// `receive()` is added in Task 6; until then this class intentionally does
 /// not `implements Medium`, since it doesn't yet satisfy that contract.
-class OdnoklassnikiMedium {
+class OdnoklassnikiMedium implements Medium {
   OdnoklassnikiMedium._({
     required String accessToken,
     required String myId,
@@ -96,5 +99,78 @@ class OdnoklassnikiMedium {
     if (success == null || success.isEmpty || success.first != true) {
       throw OdnoklassnikiApiException('Send rejected: ${response.body}');
     }
+  }
+
+  StreamController<(String, String)>? _receiveController;
+  Timer? _pollTimer;
+  final Map<String, int> _lastSeenTimestamp = {};
+
+  @override
+  Stream<(String, String)> receive() {
+    _receiveController ??= StreamController<(String, String)>.broadcast();
+    _pollTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => pollOnce());
+    return _receiveController!.stream;
+  }
+
+  /// Runs one poll cycle: list active chats, then fetch unseen messages in
+  /// each. Public (not private) so tests can trigger a deterministic poll
+  /// instead of waiting on the real Timer.
+  Future<void> pollOnce() async {
+    final chatsResponse = await _httpClient.get(
+      Uri.https(_apiHost, '/graph/me/chats', {'access_token': _accessToken}),
+    );
+    if (chatsResponse.statusCode != 200) return;
+
+    final chatsJson = jsonDecode(chatsResponse.body) as Map<String, dynamic>;
+    final chats = (chatsJson['chats'] as List?) ?? const [];
+
+    for (final chat in chats.cast<Map<String, dynamic>>()) {
+      final chatId = chat['chat_id'] as String?;
+      final participants =
+          (chat['participants'] as Map?)?.cast<String, dynamic>() ?? const {};
+      final otherPeerId = participants.keys
+          .map((k) => k.startsWith('user:') ? k.substring(5) : k)
+          .firstWhere((id) => id != _myId, orElse: () => '');
+      if (chatId == null || otherPeerId.isEmpty) continue;
+      await _pollMessages(chatId, otherPeerId);
+    }
+  }
+
+  Future<void> _pollMessages(String chatId, String peerId) async {
+    final since = _lastSeenTimestamp[chatId] ?? 0;
+    final response = await _httpClient.get(
+      Uri.https(_apiHost, '/graph/me/messages', {
+        'chat_id': chatId,
+        'access_token': _accessToken,
+        'count': '50',
+      }),
+    );
+    if (response.statusCode != 200) return;
+
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final messages = (json['messages'] as List?) ?? const [];
+    var latest = since;
+
+    for (final entry in messages.cast<Map<String, dynamic>>()) {
+      final timestamp = (entry['timestamp'] as num?)?.toInt() ?? 0;
+      if (timestamp <= since) continue;
+
+      final senderId = ((entry['sender'] as Map?)?['user_id'] as String?)
+          ?.replaceFirst('user:', '');
+      final text = (entry['message'] as Map?)?['text'] as String?;
+      if (senderId == null || senderId == _myId || text == null) continue;
+
+      _receiveController?.add((peerId, text));
+      if (timestamp > latest) latest = timestamp;
+    }
+
+    _lastSeenTimestamp[chatId] = latest;
+  }
+
+  void dispose() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _receiveController?.close();
+    _receiveController = null;
   }
 }
