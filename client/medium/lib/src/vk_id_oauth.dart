@@ -68,6 +68,14 @@ class VkIdOAuth {
       'code_challenge': codeChallenge,
       'code_challenge_method': 'S256',
       'state': state,
+      // PLACEHOLDER — 'email' is not a messaging permission. The design
+      // spec's Risks section lists "the exact OAuth scope name for
+      // messaging" as an unresolved open question; the plan's Task 12 has
+      // whoever registers the VK ID app request VALUABLE_ACCESS at the
+      // app-registration level, but the actual scope string to request
+      // here at authorize-time is still unconfirmed. Revisit/verify this
+      // during Task 12's manual login — a graph/me/messages call failing
+      // with a permissions error is the expected symptom if this is wrong.
       'scope': 'email',
     });
   }
