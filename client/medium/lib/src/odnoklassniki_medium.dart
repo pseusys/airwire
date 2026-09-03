@@ -123,7 +123,15 @@ class OdnoklassnikiMedium implements Medium {
   @override
   Stream<(String, String)> receive() {
     _receiveController ??= StreamController<(String, String)>.broadcast();
-    _pollTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => pollOnce());
+    // pollOnce()'s returned Future must not be discarded bare — any
+    // exception it throws (network failure, malformed JSON, a non-200 from
+    // the API) needs to reach the stream as an error rather than becoming
+    // an unhandled async error with no signal to the app.
+    _pollTimer ??= Timer.periodic(const Duration(seconds: 5), (_) {
+      pollOnce().catchError((Object error, StackTrace stack) {
+        _receiveController?.addError(error, stack);
+      });
+    });
     return _receiveController!.stream;
   }
 
@@ -134,7 +142,11 @@ class OdnoklassnikiMedium implements Medium {
     final chatsResponse = await _httpClient.get(
       Uri.https(_apiHost, '/graph/me/chats', {'access_token': _accessToken}),
     );
-    if (chatsResponse.statusCode != 200) return;
+    if (chatsResponse.statusCode != 200) {
+      throw OdnoklassnikiApiException(
+        'Failed to list chats: ${chatsResponse.statusCode} ${chatsResponse.body}',
+      );
+    }
 
     final chatsJson = jsonDecode(chatsResponse.body) as Map<String, dynamic>;
     final chats = (chatsJson['chats'] as List?) ?? const [];
@@ -161,7 +173,11 @@ class OdnoklassnikiMedium implements Medium {
         'count': '50',
       }),
     );
-    if (response.statusCode != 200) return;
+    if (response.statusCode != 200) {
+      throw OdnoklassnikiApiException(
+        'Failed to fetch messages for $chatId: ${response.statusCode} ${response.body}',
+      );
+    }
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     final messages = (json['messages'] as List?) ?? const [];

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:airwire_medium/airwire_medium.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
@@ -421,6 +422,114 @@ void main() {
         expect(events, equals([('peer-1', 'hi from peer')]));
 
         await subscription.cancel();
+        medium.dispose();
+      },
+    );
+
+    test(
+      'pollOnce throws OdnoklassnikiApiException instead of silently '
+      'returning on a non-200 /graph/me/chats response',
+      () async {
+        final mockClient = MockClient((request) async {
+          if (request.url.path == '/graph/me') {
+            return http.Response(jsonEncode({'uid': 'me-1'}), 200);
+          }
+          if (request.url.path == '/graph/me/chats') {
+            return http.Response('unauthorized', 401);
+          }
+          return http.Response('not found', 404);
+        });
+
+        final medium = await OdnoklassnikiMedium.authenticate(
+          accessToken: 'token-1',
+          httpClient: mockClient,
+        );
+
+        expect(
+          () => medium.pollOnce(),
+          throwsA(isA<OdnoklassnikiApiException>()),
+        );
+
+        medium.dispose();
+      },
+    );
+
+    test(
+      'pollOnce throws OdnoklassnikiApiException instead of silently '
+      'returning on a non-200 /graph/me/messages response',
+      () async {
+        final mockClient = MockClient((request) async {
+          if (request.url.path == '/graph/me') {
+            return http.Response(jsonEncode({'uid': 'me-1'}), 200);
+          }
+          if (request.url.path == '/graph/me/chats') {
+            return http.Response(
+              jsonEncode({
+                'chats': [
+                  {
+                    'chat_id': 'chat:abc123',
+                    'participants': {'user:me-1': 1000, 'user:peer-1': 1000},
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/graph/me/messages') {
+            return http.Response('unauthorized', 401);
+          }
+          return http.Response('not found', 404);
+        });
+
+        final medium = await OdnoklassnikiMedium.authenticate(
+          accessToken: 'token-1',
+          httpClient: mockClient,
+        );
+
+        expect(
+          () => medium.pollOnce(),
+          throwsA(isA<OdnoklassnikiApiException>()),
+        );
+
+        medium.dispose();
+      },
+    );
+
+    test(
+      'receive() stream surfaces an error when the timer-driven poll fails',
+      () async {
+        final mockClient = MockClient((request) async {
+          if (request.url.path == '/graph/me') {
+            return http.Response(jsonEncode({'uid': 'me-1'}), 200);
+          }
+          // /graph/me/chats always fails — simulates an expired/invalid
+          // access token so every periodic poll errors out.
+          return http.Response('unauthorized', 401);
+        });
+
+        final medium = await OdnoklassnikiMedium.authenticate(
+          accessToken: 'token-1',
+          httpClient: mockClient,
+        );
+
+        fakeAsync((async) {
+          final errors = <Object>[];
+          final subscription = medium.receive().listen(
+                (_) {},
+                onError: errors.add,
+              );
+
+          // The Timer.periodic callback discards pollOnce()'s Future, so
+          // this only reaches the stream if receive() wires up a
+          // catchError forwarding the failure to the controller.
+          async.elapse(const Duration(seconds: 5));
+
+          expect(errors, hasLength(1));
+          expect(errors.single, isA<OdnoklassnikiApiException>());
+
+          subscription.cancel();
+        });
+
         medium.dispose();
       },
     );
