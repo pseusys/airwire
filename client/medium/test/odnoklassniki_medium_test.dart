@@ -34,7 +34,24 @@ void main() {
         httpClient: mockClient,
       );
 
-      expect(medium.myId, equals('user:555000111'));
+      // myId must always be normalized to the bare id, regardless of which
+      // field it came from — every comparison site elsewhere strips a
+      // `user:` prefix before comparing, so _myId itself must already be
+      // bare or those comparisons silently never match.
+      expect(medium.myId, equals('555000111'));
+    });
+
+    test('normalizes myId when the uid field itself is prefixed', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(jsonEncode({'uid': 'user:555000111'}), 200);
+      });
+
+      final medium = await OdnoklassnikiMedium.authenticate(
+        accessToken: 'token-1',
+        httpClient: mockClient,
+      );
+
+      expect(medium.myId, equals('555000111'));
     });
 
     test('throws OdnoklassnikiApiException on a non-200 response', () async {
@@ -274,5 +291,69 @@ void main() {
       await subscription.cancel();
       medium.dispose();
     });
+
+    test(
+      'self-filter and participant selection still work when myId is '
+      'resolved from a user:-prefixed field',
+      () async {
+        final mockClient = MockClient((request) async {
+          if (request.url.path == '/graph/me') {
+            // Falls back to user_id, which (per OK's convention) is prefixed.
+            return http.Response(jsonEncode({'user_id': 'user:me-1'}), 200);
+          }
+          if (request.url.path == '/graph/me/chats') {
+            return http.Response(
+              jsonEncode({
+                'chats': [
+                  {
+                    'chat_id': 'chat:abc123',
+                    'participants': {'user:me-1': 1000, 'user:peer-1': 1000},
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/graph/me/messages') {
+            return http.Response(
+              jsonEncode({
+                'messages': [
+                  {
+                    'sender': {'user_id': 'user:me-1'},
+                    'message': {'text': 'my own message', 'mid': 'mid:1'},
+                    'timestamp': 5000,
+                  },
+                  {
+                    'sender': {'user_id': 'user:peer-1'},
+                    'message': {'text': 'hi from peer', 'mid': 'mid:2'},
+                    'timestamp': 5001,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+          return http.Response('not found', 404);
+        });
+
+        final medium = await OdnoklassnikiMedium.authenticate(
+          accessToken: 'token-1',
+          httpClient: mockClient,
+        );
+        expect(medium.myId, equals('me-1'));
+
+        final events = <(String, String)>[];
+        final subscription = medium.receive().listen(events.add);
+        await medium.pollOnce();
+        await Future<void>.delayed(Duration.zero);
+
+        // The self-sent message must be filtered out, and the peer message
+        // must be attributed to the correct (non-me) participant.
+        expect(events, equals([('peer-1', 'hi from peer')]));
+
+        await subscription.cancel();
+        medium.dispose();
+      },
+    );
   });
 }

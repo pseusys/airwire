@@ -14,6 +14,14 @@ class OdnoklassnikiApiException implements Exception {
   String toString() => 'OdnoklassnikiApiException: $message';
 }
 
+/// OK ids are sometimes seen prefixed (`user:12345`) and sometimes bare,
+/// depending on which API surface they come from. Every place in this file
+/// that compares two ids for equality must normalize both sides through
+/// this helper first, or a prefixed id will never equal an equivalent bare
+/// one.
+String _stripUserPrefix(String id) =>
+    id.startsWith('user:') ? id.substring(5) : id;
+
 /// Odnoklassniki's Graph API wrapper. Constructed via [authenticate] rather
 /// than a plain constructor because resolving `myId` requires a network
 /// call — there is no meaningful zero-argument instance.
@@ -57,8 +65,8 @@ class OdnoklassnikiMedium implements Medium {
     }
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final myId = (json['uid'] ?? json['id'] ?? json['user_id'])?.toString();
-    if (myId == null) {
+    final rawMyId = (json['uid'] ?? json['id'] ?? json['user_id'])?.toString();
+    if (rawMyId == null) {
       throw OdnoklassnikiApiException(
         'graph/me response had no recognizable id field: ${response.body}',
       );
@@ -66,7 +74,7 @@ class OdnoklassnikiMedium implements Medium {
 
     return OdnoklassnikiMedium._(
       accessToken: accessToken,
-      myId: myId,
+      myId: _stripUserPrefix(rawMyId),
       httpClient: client,
     );
   }
@@ -129,7 +137,7 @@ class OdnoklassnikiMedium implements Medium {
       final participants =
           (chat['participants'] as Map?)?.cast<String, dynamic>() ?? const {};
       final otherPeerId = participants.keys
-          .map((k) => k.startsWith('user:') ? k.substring(5) : k)
+          .map(_stripUserPrefix)
           .firstWhere((id) => id != _myId, orElse: () => '');
       if (chatId == null || otherPeerId.isEmpty) continue;
       await _pollMessages(chatId, otherPeerId);
@@ -155,8 +163,8 @@ class OdnoklassnikiMedium implements Medium {
       final timestamp = (entry['timestamp'] as num?)?.toInt() ?? 0;
       if (timestamp <= since) continue;
 
-      final senderId = ((entry['sender'] as Map?)?['user_id'] as String?)
-          ?.replaceFirst('user:', '');
+      final rawSenderId = (entry['sender'] as Map?)?['user_id'] as String?;
+      final senderId = rawSenderId == null ? null : _stripUserPrefix(rawSenderId);
       final text = (entry['message'] as Map?)?['text'] as String?;
       if (senderId == null || senderId == _myId || text == null) continue;
 
