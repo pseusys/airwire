@@ -1,0 +1,8 @@
+# Pub workspace root — the resolved .dart_tool/ (package_config.json etc.)
+# and build output live here, not in the individual member packages, since
+# this is a pub *workspace* (client/pubspec.yaml has `workspace: [medium,
+# app]`). client/pubspec.lock is intentionally NOT ignored here — for an
+# application workspace like this one, the lockfile is committed for
+# reproducible builds.
+.dart_tool/
+build/
