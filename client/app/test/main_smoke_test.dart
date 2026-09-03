@@ -16,7 +16,9 @@ void main() {
       initialState: const AuthUnauthenticated(),
     );
 
-    await tester.pumpWidget(AirwireApp(authBloc: authBloc));
+    await tester.pumpWidget(
+      AirwireApp(authBloc: authBloc, conversationPeerId: 'peer-1'),
+    );
     expect(find.text('Log in with VK ID'), findsOneWidget);
   });
 }

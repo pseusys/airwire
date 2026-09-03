@@ -10,14 +10,18 @@ import 'auth/auth_event.dart';
 
 /// Placeholder until a real VK ID app is registered — see the design spec's
 /// Risks section and this plan's Task 12.
-const _vkIdClientId = 'PLACEHOLDER_APP_ID';
-const _redirectUri = 'http://localhost:8080/callback';
+const vkIdClientId = 'PLACEHOLDER_APP_ID';
+const redirectUri = 'http://localhost:8080/callback';
+
+/// Placeholder for the single hardcoded conversation partner — see the
+/// design spec's scope and this plan's Task 12.
+const conversationPeerId = 'PLACEHOLDER_PEER_ID';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final authStore = await AuthStore.open();
   final httpClient = http.Client();
-  final oauth = VkIdOAuth(clientId: _vkIdClientId, redirectUri: _redirectUri);
+  final oauth = VkIdOAuth(clientId: vkIdClientId, redirectUri: redirectUri);
 
   final authBloc = AuthBloc(
     authStore: authStore,
@@ -37,11 +41,11 @@ Future<void> main() async {
     // Uri.base is a live view over window.location.href on web, so
     // replaceState mutates what a second Uri.base read would return,
     // silently dropping the code/state/device_id before the bloc sees them.
-    html.window.history.replaceState(null, '', _redirectUri);
+    html.window.history.replaceState(null, '', redirectUri);
     authBloc.add(AuthCallbackReceived(startupUri));
   } else {
     authBloc.add(const AuthStarted());
   }
 
-  runApp(AirwireApp(authBloc: authBloc));
+  runApp(AirwireApp(authBloc: authBloc, conversationPeerId: conversationPeerId));
 }
