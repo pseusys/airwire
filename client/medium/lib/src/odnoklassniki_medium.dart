@@ -79,13 +79,16 @@ class OdnoklassnikiMedium implements Medium {
     );
   }
 
+  @override
   String get myId => _myId;
 
   /// OK's documented limits didn't specify a message text length during
   /// planning — this is a conservative default, tightened based on real
   /// API error responses during the manual-verification task if needed.
+  @override
   int get maxMessageSize => 4096;
 
+  @override
   Future<void> send(String peerId, String text) async {
     final response = await _httpClient.post(
       Uri.https(_apiHost, '/graph/me/messages', {'access_token': _accessToken}),

@@ -1,3 +1,9 @@
+// dart:html is a deliberate, load-bearing choice for this Flutter Web-only
+// prototype (window.location/history access for the VK ID redirect
+// callback flow) — see the design spec's Risks section. A migration to
+// package:web/dart:js_interop is a known future improvement, not done here
+// to keep this prototype's scope minimal.
+// ignore: deprecated_member_use, avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 
 import 'package:airwire_medium/airwire_medium.dart';

@@ -53,7 +53,7 @@ void main() {
     test('posts the correct body and parses a successful response', () async {
       late http.Request captured;
       final mockClient = MockClient((request) async {
-        captured = request as http.Request;
+        captured = request;
         return http.Response(
           jsonEncode({
             'access_token': 'access-1',

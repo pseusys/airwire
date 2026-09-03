@@ -77,7 +77,7 @@ void main() {
         if (request.url.path == '/graph/me') {
           return http.Response(jsonEncode({'uid': 'me-1'}), 200);
         }
-        captured = request as http.Request;
+        captured = request;
         return http.Response(
           jsonEncode({
             'success': [true],
