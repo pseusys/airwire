@@ -111,11 +111,22 @@ class VkIdOAuth {
       throw VkIdAuthException('Token exchange rejected: ${json['error']}');
     }
 
-    return VkTokens(
-      accessToken: json['access_token'] as String,
-      refreshToken: json['refresh_token'] as String?,
-      vkUserId: (json['user_id'] as Object).toString(),
-      expiresInSeconds: json['expires_in'] as int? ?? 0,
-    );
+    // A successful, non-error response should have this exact shape, but if
+    // VK ID's real response is shaped even slightly differently than
+    // expected (a missing field, expires_in as a string, ...), these casts
+    // would otherwise throw a raw, undiagnosable TypeError right at the
+    // moment (a real first login) when a clear error matters most.
+    try {
+      return VkTokens(
+        accessToken: json['access_token'] as String,
+        refreshToken: json['refresh_token'] as String?,
+        vkUserId: (json['user_id'] as Object).toString(),
+        expiresInSeconds: json['expires_in'] as int? ?? 0,
+      );
+    } catch (error) {
+      throw VkIdAuthException(
+        'Unexpected token response shape: $error — body was: ${response.body}',
+      );
+    }
   }
 }

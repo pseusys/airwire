@@ -134,5 +134,38 @@ void main() {
         throwsA(isA<VkIdAuthException>()),
       );
     });
+
+    test(
+      'throws a diagnosable VkIdAuthException, not a raw TypeError, when a '
+      '200 response is shaped unexpectedly',
+      () async {
+        final mockClient = MockClient((request) async {
+          // Missing access_token entirely — would otherwise throw a raw
+          // "type 'Null' is not a subtype of type 'String'" TypeError.
+          return http.Response(jsonEncode({'user_id': 12345}), 200);
+        });
+        final oauth = VkIdOAuth(
+          clientId: 'test-client-id',
+          redirectUri: 'https://app.example.com/callback',
+          httpClient: mockClient,
+        );
+
+        expect(
+          () => oauth.exchangeCode(
+            code: 'auth-code-1',
+            deviceId: 'dev-1',
+            codeVerifier: 'verifier-1',
+            state: 'state-1',
+          ),
+          throwsA(
+            isA<VkIdAuthException>().having(
+              (e) => e.toString(),
+              'message',
+              contains('Unexpected token response shape'),
+            ),
+          ),
+        );
+      },
+    );
   });
 }
