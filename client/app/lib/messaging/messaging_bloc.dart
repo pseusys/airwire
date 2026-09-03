@@ -67,6 +67,7 @@ class MessagingBloc extends Bloc<MessagingEvent, MessagingState> {
   @override
   Future<void> close() {
     _subscription.cancel();
+    _medium.dispose();
     return super.close();
   }
 }

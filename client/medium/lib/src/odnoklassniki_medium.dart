@@ -206,6 +206,7 @@ class OdnoklassnikiMedium implements Medium {
     _lastSeenTimestamp[chatId] = latest;
   }
 
+  @override
   void dispose() {
     _pollTimer?.cancel();
     _pollTimer = null;

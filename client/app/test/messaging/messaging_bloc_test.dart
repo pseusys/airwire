@@ -34,6 +34,7 @@ class FakeMedium implements Medium {
     _controller.add((peerId, text));
   }
 
+  @override
   void dispose() => _controller.close();
 }
 
