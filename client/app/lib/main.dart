@@ -26,14 +26,19 @@ Future<void> main() async {
     redirect: (uri) => html.window.location.href = uri.toString(),
   );
 
-  final callback = parseAuthorizeCallback(Uri.base);
+  final startupUri = Uri.base;
+  final callback = parseAuthorizeCallback(startupUri);
   if (callback != null) {
     // Strip the one-time code/state from the address bar before handing it
     // to the bloc — otherwise a page refresh replays the same (by then
     // already-consumed) code through AuthCallbackReceived and clobbers a
-    // valid AuthStarted-restored session with a spurious AuthError.
+    // valid AuthStarted-restored session with a spurious AuthError. Must
+    // use the captured startupUri (not a fresh Uri.base read) below —
+    // Uri.base is a live view over window.location.href on web, so
+    // replaceState mutates what a second Uri.base read would return,
+    // silently dropping the code/state/device_id before the bloc sees them.
     html.window.history.replaceState(null, '', _redirectUri);
-    authBloc.add(AuthCallbackReceived(Uri.base));
+    authBloc.add(AuthCallbackReceived(startupUri));
   } else {
     authBloc.add(const AuthStarted());
   }
