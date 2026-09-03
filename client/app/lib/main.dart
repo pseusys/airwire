@@ -47,7 +47,12 @@ Future<void> main() async {
     // Uri.base is a live view over window.location.href on web, so
     // replaceState mutates what a second Uri.base read would return,
     // silently dropping the code/state/device_id before the bloc sees them.
-    html.window.history.replaceState(null, '', redirectUri);
+    // Use the actual current URL (minus its query) rather than the
+    // hardcoded placeholder redirectUri — history.replaceState's third
+    // argument must be same-origin with the current page or the browser
+    // throws SecurityError synchronously, which would blank the page before
+    // runApp() ever runs anywhere the origin doesn't match the placeholder.
+    html.window.history.replaceState(null, '', startupUri.replace(query: '').toString());
     authBloc.add(AuthCallbackReceived(startupUri));
   } else {
     authBloc.add(const AuthStarted());
