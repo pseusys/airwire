@@ -113,6 +113,13 @@ class OdnoklassnikiMedium implements Medium {
   Timer? _pollTimer;
   final Map<String, int> _lastSeenTimestamp = {};
 
+  /// The authoritative dedup key, per chat — a message is only ever emitted
+  /// once per `mid`. `_lastSeenTimestamp` above is kept only as a cheap
+  /// prefilter to limit how much history gets re-scanned each poll; it must
+  /// never be the sole dedup decision, since two distinct messages can share
+  /// a `timestamp` value (e.g. coarse server-side granularity).
+  final Map<String, Set<String>> _seenMessageIds = {};
+
   @override
   Stream<(String, String)> receive() {
     _receiveController ??= StreamController<(String, String)>.broadcast();
@@ -146,6 +153,7 @@ class OdnoklassnikiMedium implements Medium {
 
   Future<void> _pollMessages(String chatId, String peerId) async {
     final since = _lastSeenTimestamp[chatId] ?? 0;
+    final seenIds = _seenMessageIds.putIfAbsent(chatId, () => <String>{});
     final response = await _httpClient.get(
       Uri.https(_apiHost, '/graph/me/messages', {
         'chat_id': chatId,
@@ -161,12 +169,19 @@ class OdnoklassnikiMedium implements Medium {
 
     for (final entry in messages.cast<Map<String, dynamic>>()) {
       final timestamp = (entry['timestamp'] as num?)?.toInt() ?? 0;
-      if (timestamp <= since) continue;
+      // Cheap prefilter only — strictly-older entries can't possibly be new,
+      // but entries AT the watermark timestamp still need the mid check
+      // below, since another message can share that same timestamp value.
+      if (timestamp < since) continue;
 
+      final mid = (entry['message'] as Map?)?['mid'] as String?;
       final rawSenderId = (entry['sender'] as Map?)?['user_id'] as String?;
       final senderId = rawSenderId == null ? null : _stripUserPrefix(rawSenderId);
       final text = (entry['message'] as Map?)?['text'] as String?;
-      if (senderId == null || senderId == _myId || text == null) continue;
+      if (mid == null || senderId == null || senderId == _myId || text == null) {
+        continue;
+      }
+      if (!seenIds.add(mid)) continue; // already emitted this mid before
 
       _receiveController?.add((peerId, text));
       if (timestamp > latest) latest = timestamp;

@@ -241,6 +241,75 @@ void main() {
       medium.dispose();
     });
 
+    test(
+      'dedups by message id, not timestamp — two messages sharing the same '
+      'timestamp are both emitted',
+      () async {
+        // Simulates a poll that has already seen mid:1 at timestamp 5000,
+        // and a later poll where a second distinct message (mid:2) shows up
+        // sharing that exact same timestamp value.
+        var pollCount = 0;
+        final mockClient = MockClient((request) async {
+          if (request.url.path == '/graph/me') {
+            return http.Response(jsonEncode({'uid': 'me-1'}), 200);
+          }
+          if (request.url.path == '/graph/me/chats') {
+            return http.Response(
+              jsonEncode({
+                'chats': [
+                  {
+                    'chat_id': 'chat:abc123',
+                    'participants': {'user:me-1': 1000, 'user:peer-1': 1000},
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+          if (request.url.path == '/graph/me/messages') {
+            pollCount++;
+            final messages = [
+              {
+                'sender': {'user_id': 'user:peer-1'},
+                'message': {'text': 'first', 'mid': 'mid:1'},
+                'timestamp': 5000,
+              },
+              if (pollCount >= 2)
+                {
+                  'sender': {'user_id': 'user:peer-1'},
+                  'message': {'text': 'second, same timestamp', 'mid': 'mid:2'},
+                  'timestamp': 5000,
+                },
+            ];
+            return http.Response(jsonEncode({'messages': messages}), 200);
+          }
+          return http.Response('not found', 404);
+        });
+
+        final medium = await OdnoklassnikiMedium.authenticate(
+          accessToken: 'token-1',
+          httpClient: mockClient,
+        );
+
+        final events = <(String, String)>[];
+        final subscription = medium.receive().listen(events.add);
+        await medium.pollOnce();
+        await medium.pollOnce();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          events,
+          equals([
+            ('peer-1', 'first'),
+            ('peer-1', 'second, same timestamp'),
+          ]),
+        );
+
+        await subscription.cancel();
+        medium.dispose();
+      },
+    );
+
     test('ignores messages sent by myself', () async {
       final mockClient = MockClient((request) async {
         if (request.url.path == '/graph/me') {
