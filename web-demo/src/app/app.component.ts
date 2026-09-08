@@ -23,6 +23,7 @@ export class AppComponent {
 
   readonly message = signal('Hello, airwire! This is a demo message.');
   readonly language = signal<Language>('eng');
+  readonly textSeed = signal(this.randomSeed());
 
   readonly obfuscatedText = signal('');
   readonly originalByteLength = signal(0);
@@ -43,7 +44,7 @@ export class AppComponent {
     this.obfuscating.set(true);
     try {
       const bytes = new TextEncoder().encode(this.message());
-      const text = await encodeText(this.language(), bytes);
+      const text = await encodeText(this.language(), bytes, this.textSeed());
       this.obfuscatedText.set(text);
       this.originalByteLength.set(bytes.length);
     } catch (error) {
@@ -96,6 +97,10 @@ export class AppComponent {
 
   randomizeImageSeed(): void {
     this.imageSeed.set(this.randomSeed());
+  }
+
+  randomizeTextSeed(): void {
+    this.textSeed.set(this.randomSeed());
   }
 
   async obfuscateImage(): Promise<void> {

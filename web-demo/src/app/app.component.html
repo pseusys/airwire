@@ -32,6 +32,13 @@
         </select>
       </label>
       <label class="field">
+        <span>Seed</span>
+        <span class="seed-row">
+          <input type="number" [ngModel]="textSeed()" (ngModelChange)="textSeed.set($event)" />
+          <button type="button" class="secondary" (click)="randomizeTextSeed()">Randomize</button>
+        </span>
+      </label>
+      <label class="field">
         <span>Plaintext message</span>
         <textarea rows="3" [ngModel]="message()" (ngModelChange)="message.set($event)"></textarea>
       </label>
