@@ -60,7 +60,7 @@ export class AppComponent {
     this.revealedText.set(null);
     this.revealing.set(true);
     try {
-      const bytes = await decodeText(this.language(), this.obfuscatedText(), this.originalByteLength());
+      const bytes = await decodeText(this.language(), this.obfuscatedText(), this.originalByteLength(), this.textSeed());
       this.revealedText.set(new TextDecoder('utf-8', { fatal: false }).decode(bytes));
     } catch (error) {
       this.revealError.set(error instanceof Error ? error.message : String(error));
