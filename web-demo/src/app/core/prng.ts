@@ -45,3 +45,23 @@ export class Prng {
     return mean + z0 * std;
   }
 }
+
+const FNV_OFFSET_BASIS = 0x811c9dc5;
+const FNV_PRIME = 0x01000193;
+
+/**
+ * Deterministically combine `seed` with `text` into a new 32-bit seed, via FNV-1a. Mirrors the
+ * role of core/sources/crypto.py's `derive_key` for the Markov filler-completion design
+ * (docs/superpowers/specs/2026-09-08-markov-boundary-and-filler-design.md) without needing a real
+ * hash/crypto dependency in this demo -- fine here since what it seeds only ever drives non-secret
+ * cosmetic filler, never anything that needs to resist prediction.
+ */
+export function chainSeed(seed: number, text: string): number {
+  let hash = (seed ^ FNV_OFFSET_BASIS) >>> 0;
+  const bytes = new TextEncoder().encode(text);
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, FNV_PRIME) >>> 0;
+  }
+  return hash >>> 0;
+}
