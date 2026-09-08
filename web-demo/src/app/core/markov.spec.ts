@@ -68,8 +68,32 @@ describe('markov text disguise', () => {
     for (const size of [1, 5, 13, 37, 80]) {
       const data = crypto.getRandomValues(new Uint8Array(size));
       const text = await encodeText('eng', data, 7);
-      const decoded = await decodeText('eng', text, size);
+      const decoded = await decodeText('eng', text, size, 7);
       expect(decoded).toEqual(data);
     }
   });
+
+  it('does not reliably recover the original bytes when decoded with the wrong seed', async () => {
+    // The seed now gates the ENTIRE walk, not just the filler tail -- decoding with the wrong
+    // seed should either recover corrupted bytes, or (when the wrong candidate order squeezes a
+    // real word out of candidateRanges entirely at a narrow bit budget) throw. Both count as "did
+    // not recover the original data"; checked across several sizes for the same reason the
+    // seed-differs test above is: a single random sample is an unreliable way to check this.
+    let sawMismatch = false;
+    for (const size of [1, 5, 13, 37, 80, 199]) {
+      const data = crypto.getRandomValues(new Uint8Array(size));
+      const text = await encodeText('eng', data, 1);
+      try {
+        const recovered = await decodeText('eng', text, data.length, 2);
+        if (!arraysEqual(recovered, data)) sawMismatch = true;
+      } catch {
+        sawMismatch = true;
+      }
+    }
+    expect(sawMismatch).toBeTrue();
+  });
 });
+
+function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
