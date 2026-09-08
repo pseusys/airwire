@@ -50,10 +50,15 @@ How it works:
 
 Known limitations, worth a second look independently of this module:
 
-- The sentence-boundary token is rendered verbatim as `___END__` rather than something that reads
-  as ordinary punctuation. Correct and unambiguous, but an obvious tell to a human reader; a nicer
-  rendering (e.g. a period) is a follow-up, not attempted here to avoid the risk of it colliding
-  with a genuine one-character vocabulary word.
+- Resolved: sentence boundaries used to render as a literal `___END__` token -- correct but an
+  obvious tell to a human reader. They're now rendered as a plain `\n` instead: no word in either
+  frozen model can ever contain an embedded newline (both are built one Tatoeba sentence per line,
+  see `sources/corpus.py`), so `\n` is unambiguous as a boundary marker in a way a period isn't --
+  a period *is* a real character inside real vocabulary words (`Mr.`, `Dr.`), which is exactly why
+  reinserting boundaries by scanning for periods was tried and rejected; see
+  [the design doc](../../docs/superpowers/specs/2026-09-08-markov-boundary-and-filler-design.md)
+  for the full evidence. Bonus: a multi-line disguised message is unremarkable, unlike a literal
+  `___END__` string ever was.
 - Resolved: `MARKOV_ENG` and `MARKOV_RUS` each have their own `ChunkEncoding` identifier
   (`hyperchunk.proto`), so the header-driven auto-detection in `unpack_hyperchunk` picks the
   correct language on its own -- no more out-of-band agreement needed than any other encoding
@@ -114,6 +119,29 @@ def _next_state(state: _State, word: str, begin_state: _State) -> _State:
     return begin_state if word == END_TOKEN else state[1:] + (word,)
 
 
+def _tokenize(text: str) -> List[str]:
+    """
+    Invert the encode side's sentence-boundary rendering: split rendered text back into a flat
+    word stream with a synthetic `END_TOKEN` reinserted at each real sentence boundary (a `\n`).
+    The final line only gets one if the text actually ends in `\n` (a genuinely completed sentence)
+    -- a mid-sentence fragment with no trailing newline is left without one, since decode never
+    needs to see a boundary past the last bit it actually recovers.
+    """
+
+    lines = text.split("\n")
+    trailing_complete = text.endswith("\n")
+    if trailing_complete:
+        lines.pop()
+
+    words: List[str] = []
+    last_index = len(lines) - 1
+    for index, line in enumerate(lines):
+        words.extend(line.split())
+        if index != last_index or trailing_complete:
+            words.append(END_TOKEN)
+    return words
+
+
 _IDENTIFIERS = {
     "eng": hyperchunk_pb2.ChunkEncoding.MARKOV_ENG,
     "rus": hyperchunk_pb2.ChunkEncoding.MARKOV_RUS,
@@ -141,7 +169,8 @@ class MarkovEncoding(ChunkEncoding):
             ranges, low, high, width = candidate_ranges(low, high, width, candidates, budget)
             peeked = cursor.peek(width)
             word, low, high = next((w, lo, hi) for w, lo, hi in ranges if lo <= peeked <= hi)
-            yield (word + " ").encode("utf-8")
+            rendered = "\n" if word == END_TOKEN else word + " "
+            yield rendered.encode("utf-8")
             state = _next_state(state, word, begin_state)
             common = common_leading_bits(low, high, width)
             if common:
@@ -153,7 +182,7 @@ class MarkovEncoding(ChunkEncoding):
         begin_state: _State = (BEGIN_TOKEN,) * state_size
 
         try:
-            words = encoded.decode("utf-8").split()
+            words = _tokenize(encoded.decode("utf-8"))
         except UnicodeDecodeError as error:
             raise ValueError(f"Markov-encoded chunk payload isn't valid UTF-8: {error}!") from error
 

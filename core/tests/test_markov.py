@@ -13,6 +13,14 @@ def _round_trip(encoding: MarkovEncoding, data: bytes) -> bytes:
     return encoding.decode(text, len(data), NONCE)
 
 
+def _replace_first_word(text: str, replacement: str) -> str:
+    lines = text.split("\n")
+    words = lines[0].split()
+    words[0] = replacement
+    lines[0] = " ".join(words) + " "
+    return "\n".join(lines)
+
+
 @pytest.mark.parametrize("data", SAMPLES)
 def test_english_round_trip(data: bytes) -> None:
     assert _round_trip(MARKOV_ENG, data) == data
@@ -48,16 +56,20 @@ def test_output_looks_like_words_separated_by_spaces() -> None:
     assert all(word.strip() == word and word for word in words)
 
 
-def test_output_contains_sentence_boundaries_for_longer_input() -> None:
+def test_output_contains_newline_sentence_boundaries_for_longer_input() -> None:
     text = b"".join(MARKOV_ENG.encode_atoms(token_bytes(200), NONCE)).decode("utf-8")
-    assert END_TOKEN in text
+    assert "\n" in text
+
+
+def test_output_never_contains_the_literal_end_token() -> None:
+    text = b"".join(MARKOV_ENG.encode_atoms(token_bytes(200), NONCE)).decode("utf-8")
+    assert END_TOKEN not in text
 
 
 def test_decode_rejects_word_not_valid_at_current_state() -> None:
     data = token_bytes(20)
-    words = b"".join(MARKOV_ENG.encode_atoms(data, NONCE)).decode("utf-8").split()
-    words[0] = "supercalifragilisticexpialidocious"
-    tampered = (" ".join(words) + " ").encode("utf-8")
+    text = b"".join(MARKOV_ENG.encode_atoms(data, NONCE)).decode("utf-8")
+    tampered = _replace_first_word(text, "supercalifragilisticexpialidocious").encode("utf-8")
     with pytest.raises(ValueError):
         MARKOV_ENG.decode(tampered, len(data), NONCE)
 
@@ -69,23 +81,22 @@ def test_decode_rejects_malformed_utf8() -> None:
 
 def test_decode_rejects_too_short_word_sequence() -> None:
     data = token_bytes(50)
-    words = b"".join(MARKOV_ENG.encode_atoms(data, NONCE)).decode("utf-8").split()
-    truncated = (" ".join(words[: max(1, len(words) // 2)]) + " ").encode("utf-8")
+    text = b"".join(MARKOV_ENG.encode_atoms(data, NONCE)).decode("utf-8")
+    truncated = text[: len(text) // 2].encode("utf-8")
     with pytest.raises(ValueError):
         MARKOV_ENG.decode(truncated, len(data), NONCE)
 
 
 def test_tampering_a_still_valid_word_changes_the_recovered_bytes() -> None:
     data = token_bytes(20)
-    words = b"".join(MARKOV_ENG.encode_atoms(data, NONCE)).decode("utf-8").split()
+    text = b"".join(MARKOV_ENG.encode_atoms(data, NONCE)).decode("utf-8")
     # Swap the first word for something valid at the begin state but (almost certainly) different.
-    tampered = list(words)
-    tampered[0] = "The" if tampered[0] != "The" else "A"
-    original_text = (" ".join(words) + " ").encode("utf-8")
-    tampered_text = (" ".join(tampered) + " ").encode("utf-8")
-    original_result = MARKOV_ENG.decode(original_text, len(data), NONCE)
+    first_word = text.split("\n")[0].split()[0]
+    replacement = "The" if first_word != "The" else "A"
+    tampered_text = _replace_first_word(text, replacement)
+    original_result = MARKOV_ENG.decode(text.encode("utf-8"), len(data), NONCE)
     try:
-        tampered_result = MARKOV_ENG.decode(tampered_text, len(data), NONCE)
+        tampered_result = MARKOV_ENG.decode(tampered_text.encode("utf-8"), len(data), NONCE)
     except ValueError:
         return  # also an acceptable outcome: the swap desynchronized the walk entirely.
     assert tampered_result != original_result
