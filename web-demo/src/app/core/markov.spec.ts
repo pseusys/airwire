@@ -50,10 +50,18 @@ describe('markov text disguise', () => {
   });
 
   it('produces different output for different seeds over the same data', async () => {
-    const data = crypto.getRandomValues(new Uint8Array(30));
-    const a = await encodeText('eng', data, 1);
-    const b = await encodeText('eng', data, 2);
-    expect(a).not.toEqual(b);
+    // Checked across several sizes, not just one sample: whenever a payload happens to land
+    // exactly on a sentence boundary, filler never triggers and the seed genuinely has no effect
+    // -- that's correct behavior, not a bug, but it means a single random sample is an unreliable
+    // way to check this property.
+    let sawDifference = false;
+    for (const size of [1, 5, 13, 37, 80]) {
+      const data = crypto.getRandomValues(new Uint8Array(size));
+      const a = await encodeText('eng', data, 1);
+      const b = await encodeText('eng', data, 2);
+      if (a !== b) sawDifference = true;
+    }
+    expect(sawDifference).toBeTrue();
   });
 
   it('still round-trips correctly when filler completion is used', async () => {

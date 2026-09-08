@@ -125,11 +125,19 @@ def test_filler_completion_is_deterministic() -> None:
 
 
 def test_filler_completion_differs_across_nonces() -> None:
-    data = token_bytes(37)
+    # Checked across several sizes, not just one sample: whenever a payload happens to land
+    # exactly on a sentence boundary, filler never triggers and the nonce genuinely has no effect
+    # -- that's correct behavior, not a bug, but it means a single random sample is an unreliable
+    # way to check this property.
     other_nonce = token_bytes(24)
-    a = b"".join(MARKOV_ENG.encode_atoms(data, NONCE))
-    b = b"".join(MARKOV_ENG.encode_atoms(data, other_nonce))
-    assert a != b
+    saw_difference = False
+    for size in (1, 5, 13, 37, 80):
+        data = token_bytes(size)
+        a = b"".join(MARKOV_ENG.encode_atoms(data, NONCE))
+        b = b"".join(MARKOV_ENG.encode_atoms(data, other_nonce))
+        if a != b:
+            saw_difference = True
+    assert saw_difference
 
 
 def test_round_trip_still_correct_when_filler_is_used() -> None:
