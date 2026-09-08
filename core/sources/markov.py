@@ -59,6 +59,15 @@ Known limitations, worth a second look independently of this module:
   [the design doc](../../docs/superpowers/specs/2026-09-08-markov-boundary-and-filler-design.md)
   for the full evidence. Bonus: a multi-line disguised message is unremarkable, unlike a literal
   `___END__` string ever was.
+- Resolved: the very last sentence of a hyperslice's rendered text used to just trail off mid-walk
+  whenever the real ciphertext bits ran out before a sentence naturally finished -- unlike every
+  sentence before it, which always ends in a real, bit-driven `___END__`/`\n`. `_finish_sentence`
+  now completes it with plausible, non-secret filler words (weighted by the same corpus
+  frequencies, picked by a seeded PRNG rather than the arithmetic coder) whenever this happens.
+  Decode needs no changes for this: it already stops consuming words the moment `length` bytes are
+  recovered, so the filler tail is already invisible to it, real or not. See the design doc linked
+  above for why the seed is chained across each real sentence's own content
+  (`derive_key(seed, sentence_bytes, ...)`) rather than derived from `nonce` alone.
 - Resolved: `MARKOV_ENG` and `MARKOV_RUS` each have their own `ChunkEncoding` identifier
   (`hyperchunk.proto`), so the header-driven auto-detection in `unpack_hyperchunk` picks the
   correct language on its own -- no more out-of-band agreement needed than any other encoding
@@ -68,9 +77,11 @@ Known limitations, worth a second look independently of this module:
 
 from functools import lru_cache
 from pathlib import Path
+from random import Random
 from typing import Dict, Iterator, List, Tuple
 
 from sources.arithmetic import BitAccumulator, BitCursor, candidate_ranges, common_leading_bits, strip_top_bits
+from sources.crypto import derive_key
 from sources.encodings import ChunkEncoding
 from sources.proto import hyperchunk_pb2
 
@@ -78,6 +89,10 @@ _DATA_DIR = Path(__file__).resolve().parent / "data"
 
 BEGIN_TOKEN = "___BEGIN__"
 END_TOKEN = "___END__"
+
+_FILLER_SEED_LABEL = b"airwire-markov-filler-seed"
+_FILLER_SEED_SIZE = 4
+_MAX_FILLER_WORDS = 50
 
 _State = Tuple[str, ...]
 _Candidates = List[Tuple[str, int]]
@@ -142,6 +157,32 @@ def _tokenize(text: str) -> List[str]:
     return words
 
 
+def _finish_sentence(chain: _Chain, state: _State, begin_state: _State, seed: bytes) -> Iterator[bytes]:
+    """
+    Complete an in-progress sentence when real ciphertext bits have run out mid-walk, so the
+    rendered text's last sentence always ends like every other one instead of trailing off. Not
+    secret -- the completion words carry no ciphertext bits, only cosmetic filler -- so a plain
+    seeded PRNG (not the arithmetic coder) picks each one, weighted by the same corpus frequencies
+    real words are chosen from, until the walk lands back on `begin_state` (an END_TOKEN draw).
+    Bounded by `_MAX_FILLER_WORDS`: a frozen model with no path to END_TOKEN from some state would
+    otherwise loop forever, which is a setup problem, not a wire-tamper one.
+    """
+
+    rng = Random(int.from_bytes(seed, "big"))
+    for _ in range(_MAX_FILLER_WORDS):
+        candidates = _candidates_for(chain, state)
+        words = [word for word, _ in candidates]
+        weights = [count for _, count in candidates]
+        word = rng.choices(words, weights=weights, k=1)[0]
+        state = _next_state(state, word, begin_state)
+        if word == END_TOKEN:
+            yield b"\n"
+            return
+        yield (word + " ").encode("utf-8")
+
+    raise MarkovModelError(f"Could not complete the final sentence within {_MAX_FILLER_WORDS} words; the frozen model may have no path to {END_TOKEN!r} from this state!")
+
+
 _IDENTIFIERS = {
     "eng": hyperchunk_pb2.ChunkEncoding.MARKOV_ENG,
     "rus": hyperchunk_pb2.ChunkEncoding.MARKOV_RUS,
@@ -162,6 +203,8 @@ class MarkovEncoding(ChunkEncoding):
         cursor = BitCursor(data)
         low, high, width = 0, 1, 1
         state = begin_state
+        seed = derive_key(nonce, _FILLER_SEED_LABEL, size=_FILLER_SEED_SIZE)
+        sentence_words: List[str] = []
 
         while cursor.remaining() > 0:
             budget = cursor.remaining()
@@ -169,13 +212,22 @@ class MarkovEncoding(ChunkEncoding):
             ranges, low, high, width = candidate_ranges(low, high, width, candidates, budget)
             peeked = cursor.peek(width)
             word, low, high = next((w, lo, hi) for w, lo, hi in ranges if lo <= peeked <= hi)
-            rendered = "\n" if word == END_TOKEN else word + " "
-            yield rendered.encode("utf-8")
             state = _next_state(state, word, begin_state)
+            if word == END_TOKEN:
+                yield b"\n"
+                seed = derive_key(seed, "".join(sentence_words).encode("utf-8"), size=_FILLER_SEED_SIZE)
+                sentence_words = []
+            else:
+                rendered = word + " "
+                yield rendered.encode("utf-8")
+                sentence_words.append(rendered)
             common = common_leading_bits(low, high, width)
             if common:
                 cursor.consume(min(common, cursor.remaining()))
                 low, high, width = strip_top_bits(low, high, width, common)
+
+        if state != begin_state:
+            yield from _finish_sentence(chain, state, begin_state, seed)
 
     def decode(self, encoded: bytes, length: int, nonce: bytes) -> bytes:
         state_size, chain = _load_model(self.language)

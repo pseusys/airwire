@@ -2,10 +2,10 @@ from secrets import token_bytes
 
 import pytest
 
-from sources.markov import END_TOKEN, MARKOV_ENG, MARKOV_RUS, MarkovEncoding, MarkovModelError
+from sources.markov import BEGIN_TOKEN, END_TOKEN, MARKOV_ENG, MARKOV_RUS, MarkovEncoding, MarkovModelError, _finish_sentence
 
 SAMPLES = [b"", b"\x00", b"\xff", b"hi", token_bytes(1), token_bytes(20), token_bytes(80)]
-NONCE = token_bytes(24)  # MarkovEncoding ignores it; kept for interface parity with ImageEncoding.
+NONCE = token_bytes(24)  # now seeds filler completion -- see test_filler_completion_differs_across_nonces.
 
 
 def _round_trip(encoding: MarkovEncoding, data: bytes) -> bytes:
@@ -109,3 +109,42 @@ def test_unknown_language_raises_markov_model_error() -> None:
 
 def test_markov_eng_and_rus_have_distinct_identifiers() -> None:
     assert MARKOV_ENG.identifier != MARKOV_RUS.identifier
+
+
+def test_encoded_text_always_ends_with_a_completed_sentence() -> None:
+    for size in (1, 5, 13, 37, 80, 199):
+        text = b"".join(MARKOV_ENG.encode_atoms(token_bytes(size), NONCE)).decode("utf-8")
+        assert text.endswith("\n"), f"Expected a completed final sentence for a {size}-byte payload!"
+
+
+def test_filler_completion_is_deterministic() -> None:
+    data = token_bytes(37)
+    first = b"".join(MARKOV_ENG.encode_atoms(data, NONCE))
+    second = b"".join(MARKOV_ENG.encode_atoms(data, NONCE))
+    assert first == second
+
+
+def test_filler_completion_differs_across_nonces() -> None:
+    data = token_bytes(37)
+    other_nonce = token_bytes(24)
+    a = b"".join(MARKOV_ENG.encode_atoms(data, NONCE))
+    b = b"".join(MARKOV_ENG.encode_atoms(data, other_nonce))
+    assert a != b
+
+
+def test_round_trip_still_correct_when_filler_is_used() -> None:
+    for size in (1, 5, 13, 37, 80, 199):
+        data = token_bytes(size)
+        assert _round_trip(MARKOV_ENG, data) == data
+
+
+def test_finish_sentence_raises_when_no_path_to_end_exists() -> None:
+    begin_state = (BEGIN_TOKEN, BEGIN_TOKEN)
+    state_a = ("stuck", "here")
+    state_b = ("here", "stuck")
+    chain = {
+        state_a: [("stuck", 1)],
+        state_b: [("here", 1)],
+    }
+    with pytest.raises(MarkovModelError):
+        list(_finish_sentence(chain, state_a, begin_state, b"\x00\x00\x00\x00"))
