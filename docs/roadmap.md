@@ -34,13 +34,17 @@ Checked against existing prior art before scoping the phases below:
 
 ## Phase 0 — Core engine PoC (Python, no app)
 
-**Status: in progress, mostly done.** Crypto, chunking, and the Markov-chain text disguise encoder
-are implemented and tested in [`core/`](../core/), with CI ([`.github/workflows/core.yml`](../.github/workflows/core.yml))
-running the full test suite plus example invocations on every push and pull request. Image
-steganography is the one piece of the original scope not started yet. Every non-obvious technical
-choice made along the way — and there have been several — is logged in
+**Status: in progress, mostly done.** Crypto, chunking, both disguise encoders (text and image,
+both wired into the wire protocol), and the session handshake are implemented and tested in
+[`core/`](../core/), with CI ([`.github/workflows/core.yml`](../.github/workflows/core.yml))
+running the full test suite plus example invocations on every push and pull request. What's left
+is a handful of overhead-reduction TODOs (none blocking), image synthesis's visual-quality
+tradeoffs on large-scale-structure textures, and the two "bonus" wrap-up items below (test vectors,
+relay-server stub). Every non-obvious technical choice made along the way — and there have been
+several — is logged in
 [`docs/design-decisions.md`](./design-decisions.md) as it happens, rather than only living in
-code comments.
+code comments. See [`core/README.md`](../core/README.md#how-the-steganography-works) for how both
+disguise mechanisms actually work.
 
 The deliverable is a small, well-tested Python package implementing the wire-level logic from the
 [README](../README.md), independent of any platform:
@@ -61,28 +65,42 @@ The deliverable is a small, well-tested Python package implementing the wire-lev
   represented on the wire is itself pluggable (`ChunkEncoding`: raw bytes, base64, or
   Markov-chain-disguised text) — see
   [design decision #2](./design-decisions.md#2-pluggable-wire-encodings-for-hyperchunk-payloads).
-- **Obfuscation encoders** — of the two originally scoped, one is done and one isn't:
-  - *Markov-chain text disguise* (done) — ciphertext bytes are mapped to plausible-looking
-    sentences, word choice driven by a frozen per-language Markov chain trained from real corpora
-    ([`sources/corpus.py`](../core/sources/corpus.py), [`scripts/model.py`](../core/scripts/model.py))
-    and a from-scratch, pure-integer arithmetic coder — no floating point, no ML inference anywhere
-    in the encode/decode path. See
+- **Obfuscation encoders** — both originally-scoped strategies now exist, at different levels of
+  maturity; see [`core/README.md`](../core/README.md#how-the-steganography-works) for how each
+  one actually works, step by step:
+  - *Markov-chain text disguise* (done, wired into the wire protocol) — ciphertext bytes are
+    mapped to plausible-looking sentences, word choice driven by a frozen per-language Markov
+    chain trained from real corpora ([`sources/corpus.py`](../core/sources/corpus.py),
+    [`scripts/model.py`](../core/scripts/model.py)) and a from-scratch, pure-integer arithmetic
+    coder — no floating point, no ML inference anywhere in the encode/decode path. See
     [design decision #3](./design-decisions.md#3-the-markov-chain-text-disguise-encoding) for why a
     general-purpose entropy-coding library didn't fit this problem and what was built instead.
-    English and Russian corpora both work; only English is currently wired into the automatic
-    wire-format detection `unpack_hyperchunk` relies on (documented limitation, not a bug).
-  - *Image steganography* (not started) — the only remaining gap in Phase 0. Likely simpler than
-    the text case in one sense (the README's own bar is "looks like noise," which AEAD ciphertext
-    already does, not "looks like a real photo" — no training or corpus needed), but open on
-    architecture: an image file's internal structure (headers, checksums, compression) means it
-    probably can't be split across many small SMS-sized `ChunkEncoding` pieces the way raw
-    bytes/base64/Markov text can — it may need its own delivery shape (one hyperslice → one MMS
-    attachment) rather than a fourth `ChunkEncoding` implementation. Worth deciding before writing
-    code.
+    English and Russian both have their own wire identifier and are both auto-detected correctly by
+    `unpack_hyperchunk` (an earlier, resolved limitation only had English wired in).
+  - *Image steganography* (done, wired into the wire protocol) — a patch-based texture synthesis
+    technique (adapted from a 2015 academic paper, non-neural, reusing the same arithmetic coder as
+    the text case) turns ciphertext bytes into an abstract, patterned image generated from a small
+    procedural source texture. Round-trips exactly for all four texture styles; visual quality
+    still varies (smooth noise-based textures hold up well, textures with large connected shapes
+    are still visibly more fragmented than their source). See
+    [design decision #4](./design-decisions.md#4-image-steganography-patch-based-texture-synthesis-prototype)
+    for the details and what's still open on the visual-quality front. The wire-integration
+    question is resolved: each texture flavor is a `ChunkEncoding` whose single atom is the whole
+    PNG-encoded image, so it reuses `chunking.py`'s header/ack/retry machinery exactly like the
+    text encodings, just with an MMS-scale `chunk_size` — no separate delivery path needed.
+  - *Session handshake* (designed and implemented) — establishes the session key `chunking.py`
+    always assumed already existed, via an unsigned, plain-TOFU certificate exchange of fresh
+    per-conversation X25519 keys. Also derives, from nothing but each sender's own public transport
+    identifier, which disguise (language/flavor) that sender's messages use for the whole
+    conversation — handshake certificate included, via the same `header_encoding` mechanism that
+    lets the header itself be disguised, not just the payload. See
+    [`docs/handshake.md`](./handshake.md) for the full design and its security properties/limits,
+    and [design decision #5](./design-decisions.md#5-session-handshake).
 - **Test strategy** — `pytest` round trips for: encrypt→chunk→reassemble→decrypt,
-  encrypt→stego-encode→stego-decode→decrypt (done for the Markov encoder, pending for images), and
-  tamper detection (corrupted auth tag must fail closed). No device needed anywhere in this phase,
-  and CI now runs all of it automatically on every push/PR.
+  encrypt→stego-encode→stego-decode→decrypt (Markov, image synthesis, and the wired-together
+  `ChunkEncoding` path for both), handshake certificate exchange/session-key agreement, and tamper
+  detection (corrupted auth tag must fail closed). No device needed anywhere in this phase, and CI
+  now runs all of it automatically on every push/PR.
 - **Bonus, low-cost extension (not started):** this PoC becomes the source of
   *cross-implementation test vectors* — encrypt with Python, assert the future Kotlin/Swift client
   decrypts it correctly, and vice versa. Cheap insurance against the mobile port silently drifting
