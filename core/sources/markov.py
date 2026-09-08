@@ -68,6 +68,18 @@ Known limitations, worth a second look independently of this module:
   recovered, so the filler tail is already invisible to it, real or not. See the design doc linked
   above for why the seed is chained across each real sentence's own content
   (`derive_key(seed, sentence_bytes, ...)`) rather than derived from `nonce` alone.
+- Resolved: the nonce used to gate only the cosmetic filler tail (previous point);
+  every state's candidate order is now also shuffled by a nonce-derived permutation
+  (`_permuted_candidates`) before `candidate_ranges` assigns bit-range boundaries to it, so the
+  *entire* walk -- not just the filler tail -- depends on the nonce, matching how the image
+  disguise's seed already gates its whole texture. Without the right nonce, decode still
+  recognizes every word as a valid continuation (membership doesn't depend on order) but recovers
+  the wrong bits, failing downstream at the AEAD tag check instead of in this module -- the same
+  failure shape a wrong image seed already has. See
+  [the design doc](../../docs/superpowers/specs/2026-09-08-markov-seed-broadening-design.md) for
+  why this doesn't make the scheme cryptographically secure (it's still deterministic,
+  unauthenticated, and unproven) -- it only raises the cost of extracting a payload from "trivial"
+  to "brute-force the seed space," the same informal protection level image's seed already gives.
 - Resolved: `MARKOV_ENG` and `MARKOV_RUS` each have their own `ChunkEncoding` identifier
   (`hyperchunk.proto`), so the header-driven auto-detection in `unpack_hyperchunk` picks the
   correct language on its own -- no more out-of-band agreement needed than any other encoding
@@ -91,6 +103,7 @@ BEGIN_TOKEN = "___BEGIN__"
 END_TOKEN = "___END__"
 
 _FILLER_SEED_LABEL = b"airwire-markov-filler-seed"
+_PERMUTATION_SEED_LABEL = b"airwire-markov-permutation-seed"
 _FILLER_SEED_SIZE = 4
 _MAX_FILLER_WORDS = 50
 
@@ -128,6 +141,26 @@ def _candidates_for(chain: _Chain, state: _State) -> _Candidates:
         return chain[state]
     except KeyError:
         raise MarkovModelError(f"No transitions recorded for state {state!r}; the frozen model may be truncated!") from None
+
+
+def _permuted_candidates(chain: _Chain, state: _State, permutation_seed: bytes, cache: Dict[_State, _Candidates]) -> _Candidates:
+    """
+    Same candidates as `_candidates_for`, but shuffled by a seed derived from `permutation_seed` --
+    this is what makes `candidate_ranges`'s bit-range assignment (and therefore every word choice
+    in the main walk) genuinely depend on the nonce, not just the cosmetic filler tail. Memoized
+    per call via `cache` (never the module-level `_load_model` cache: this depends on the nonce and
+    must not leak across calls with different ones).
+    """
+
+    cached = cache.get(state)
+    if cached is not None:
+        return cached
+    candidates = _candidates_for(chain, state)
+    key = derive_key(permutation_seed, "".join(state).encode("utf-8"), size=8)
+    shuffled = list(candidates)
+    Random(int.from_bytes(key, "big")).shuffle(shuffled)
+    cache[state] = shuffled
+    return shuffled
 
 
 def _next_state(state: _State, word: str, begin_state: _State) -> _State:
@@ -204,11 +237,13 @@ class MarkovEncoding(ChunkEncoding):
         low, high, width = 0, 1, 1
         state = begin_state
         seed = derive_key(nonce, _FILLER_SEED_LABEL, size=_FILLER_SEED_SIZE)
+        permutation_seed = derive_key(nonce, _PERMUTATION_SEED_LABEL, size=_FILLER_SEED_SIZE)
+        permutation_cache: Dict[_State, _Candidates] = {}
         sentence_words: List[str] = []
 
         while cursor.remaining() > 0:
             budget = cursor.remaining()
-            candidates = _candidates_for(chain, state)
+            candidates = _permuted_candidates(chain, state, permutation_seed, permutation_cache)
             ranges, low, high, width = candidate_ranges(low, high, width, candidates, budget)
             peeked = cursor.peek(width)
             word, low, high = next((w, lo, hi) for w, lo, hi in ranges if lo <= peeked <= hi)
@@ -241,11 +276,13 @@ class MarkovEncoding(ChunkEncoding):
         accumulator = BitAccumulator(length)
         low, high, width = 0, 1, 1
         state = begin_state
+        permutation_seed = derive_key(nonce, _PERMUTATION_SEED_LABEL, size=_FILLER_SEED_SIZE)
+        permutation_cache: Dict[_State, _Candidates] = {}
 
         for word in words:
             if accumulator.done():
                 break
-            candidates = _candidates_for(chain, state)
+            candidates = _permuted_candidates(chain, state, permutation_seed, permutation_cache)
             ranges, low, high, width = candidate_ranges(low, high, width, candidates, accumulator.remaining())
             match = next(((lo, hi) for w, lo, hi in ranges if w == word), None)
             if match is None:

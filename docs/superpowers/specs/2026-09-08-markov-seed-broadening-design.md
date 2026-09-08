@@ -213,13 +213,26 @@ Two different "lengths" are in play, and only one of them stays invariant:
 
 ## Error Handling
 
-No new error paths. Decoding with the wrong seed does not raise a
-distinct exception at the Markov-encoding layer — words remain
-recognizable as valid state transitions (membership is order-independent),
-so the walk completes, but recovers corrupted bits. This is caught by the
-existing AEAD tag check one layer up (`Symmetric.decrypt`), exactly the
-same failure shape image's wrong-seed case already has. No behavior
-change needed to `MarkovModelError`/decode's existing `ValueError` cases.
+No new exception types. Decoding with the wrong seed generally does
+*not* raise a distinct exception at the Markov-encoding layer — words
+remain recognizable as valid state transitions (membership is
+order-independent), so the walk completes but recovers corrupted bits,
+caught downstream by the existing AEAD tag check (`Symmetric.decrypt`),
+the same failure shape image's wrong-seed case already has.
+
+One case surfaces earlier, discovered during implementation:
+`candidate_ranges` can render some candidates unreachable outright when
+the remaining bit budget is too narrow to give every candidate a distinct
+sub-range (`core/sources/arithmetic.py:57-60`'s squeeze-out check, `if
+end >= cursor`) — and *which* candidates get squeezed out is
+order-dependent. So decoding with the wrong permutation can occasionally
+hit a real word that `candidate_ranges` no longer assigns any range to at
+all, raising the existing `ValueError("... is not a valid continuation
+...")` — an *earlier*, more explicit failure than silent corruption, not
+a new error path (this exception already exists for tampered input). No
+behavior change needed to `MarkovModelError`/decode's existing
+`ValueError` cases; tests must simply treat both outcomes (corrupted
+bytes, or this `ValueError`) as "did not recover the original data."
 
 ## Testing
 

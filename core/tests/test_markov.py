@@ -5,7 +5,8 @@ import pytest
 from sources.markov import BEGIN_TOKEN, END_TOKEN, MARKOV_ENG, MARKOV_RUS, MarkovEncoding, MarkovModelError, _finish_sentence
 
 SAMPLES = [b"", b"\x00", b"\xff", b"hi", token_bytes(1), token_bytes(20), token_bytes(80)]
-NONCE = token_bytes(24)  # now seeds filler completion -- see test_filler_completion_differs_across_nonces.
+NONCE = token_bytes(24)  # now seeds real-content candidate order too, not just filler completion --
+# see test_decode_with_wrong_nonce_does_not_recover_original_data.
 
 
 def _round_trip(encoding: MarkovEncoding, data: bytes) -> bytes:
@@ -138,6 +139,28 @@ def test_filler_completion_differs_across_nonces() -> None:
         if a != b:
             saw_difference = True
     assert saw_difference
+
+
+def test_decode_with_wrong_nonce_does_not_recover_original_data() -> None:
+    # The seed now gates the ENTIRE walk, not just the filler tail -- decoding with the wrong
+    # nonce should either recover corrupted bytes, or (when the wrong candidate order squeezes a
+    # real word out of `candidate_ranges` entirely at a narrow bit budget -- see
+    # sources/arithmetic.py's `candidate_ranges` docstring) raise ValueError outright. Both count
+    # as "did not recover the original data"; checked across several sizes for the same reason the
+    # filler-nonce test is: a single random sample is an unreliable way to check this property.
+    other_nonce = token_bytes(24)
+    saw_mismatch = False
+    for size in (1, 5, 13, 37, 80, 199):
+        data = token_bytes(size)
+        text = b"".join(MARKOV_ENG.encode_atoms(data, NONCE))
+        try:
+            recovered = MARKOV_ENG.decode(text, len(data), other_nonce)
+        except ValueError:
+            saw_mismatch = True
+            continue
+        if recovered != data:
+            saw_mismatch = True
+    assert saw_mismatch
 
 
 def test_round_trip_still_correct_when_filler_is_used() -> None:
