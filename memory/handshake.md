@@ -108,8 +108,34 @@ A materially different, more advanced crypto scheme for the eventual real protoc
 - **Header encryption is a stream cipher (XChaCha20, no Poly1305)**, not full AEAD — only the data
   portion gets a Poly1305 tag; the header's own tag lives inside its (stream-encrypted) plaintext,
   covering the header fields via a separate `n_tag` derivation.
+- **`bootstrap_key` is pair-specific, not sender-only**: `derive_key(peer_id, my_id,
+  "airwire-handshake-bootstrap", 32)` — a deliberate departure from the currently-implemented design
+  above, where `bootstrap_key(sender_id)` depends only on the sender. Being pair-specific means two
+  different peers of the same sender no longer share a bootstrap key at all, narrowing any
+  nonce-adjacent concern (see the currently-implemented section's own caveat about
+  `bootstrap_key` providing no confidentiality) to one specific pair rather than a sender's entire
+  contact list.
+- **Key selection on receive has no explicit message-type field at all** — which key successfully
+  authenticates a message *is* the type signal. No peer record for a `peer_id` → try
+  `bootstrap_key(peer_id, my_id)` (success creates the peer record, i.e. this is a certificate).
+  Peer record exists → try the current directional key first (no grace window needed, since
+  delivery is strictly ordered and lossless per peer), falling back to `bootstrap_key(peer_id,
+  my_id)` if that fails, to recover from one-sided session loss (the peer restarted and is sending a
+  fresh certificate) rather than discarding the message.
+- **Considered and rejected: replay-detection on the certificate's transmitted nonce.** The
+  certificate phase's nonce can't be counter-derived (see below) and so is transmitted in the clear
+  once per certificate — rejecting a *repeated* value was considered as an extra safety net, but
+  doesn't add real protection: an adversary capable of forging a malicious certificate at all can
+  just generate a fresh keypair and a fresh nonce rather than replaying an old one, and
+  `bootstrap_key` being derivable by anyone who knows both IDs means nothing stops that regardless.
 
-None of this — directional keys, rotation, counter-derived nonces, stream-cipher headers — exists in
-`core/sources/crypto.py`/`chunking.py` today. If a future Dart or Python change starts implementing
-rotation, it belongs here as a status update, not as a silent assumption that it already matches this
-section.
+None of this — directional keys, rotation, counter-derived nonces, stream-cipher headers,
+pair-specific bootstrap keys — exists in `core/sources/crypto.py`/`chunking.py`/`handshake.py`
+today. If a future Dart or Python change starts implementing rotation, it belongs here as a status
+update, not as a silent assumption that it already matches this section. This summary doesn't
+attempt to be exhaustive — the full mechanism (fragment framing, header-vs-data disguise chaining,
+the `n_tag` binding that protects `N` and rotation material specifically, minimum-fragment-budget
+rules for a disguised header) stays in
+[`docs/superpowers/specs/2026-08-27-messaging-protocol-design.md`](../docs/superpowers/specs/2026-08-27-messaging-protocol-design.md)
+until real implementation work on it actually begins — absorbing all 485 lines of a still-draft,
+unbuilt spec into this file isn't earned yet (see `memory/README.md`'s growth criteria).

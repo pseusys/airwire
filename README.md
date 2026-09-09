@@ -176,4 +176,5 @@ The core application (web mode + SMS mode) is free.
 
 ## License
 
-TODO!
+Proprietary. All rights reserved — no license is granted to use, copy, modify, or distribute this
+code.

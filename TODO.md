@@ -35,71 +35,9 @@ on every push to `main`; it's a stateless demo, not the product.
 | A4. Fix `core/` source comments pointing at deleted `docs/design-decisions.md` | Done — 8 files, 22 lines fixed (broader than originally scoped); also fixed a pre-existing mypy failure found along the way | `CHANGELOG.md` |
 | A5. Web-demo unit test coverage gap | Done — 5 new spec files, 42 tests, all passing; 0 lint issues | `CHANGELOG.md` |
 | A3. Full repo coding-guidelines review | Done — found and fixed 1 real violation (inline `import json`), documented 2 legitimate pre-existing exceptions, filed 1 finding needing a decision (E3) | `CHANGELOG.md` |
-
-### A6. Root `README.md`'s License section is an unresolved placeholder
-
-**What.** `README.md`'s License section literally reads `TODO!` — no license has ever been chosen
-for this repository.
-
-**How.** Pick a license (or explicitly decide "proprietary, no license file") and replace the
-placeholder.
-
-**Why.** Visible, unresolved placeholder in the first document anyone reads — predates this
-session's docs work but was not this session's to resolve unilaterally (a real decision, not a
-docs-migration mechanical fix).
-
-### A7. Audit `client/`'s READMEs and any other docs still worth migrating into `memory/`
-
-**What.** `client/app/README.md` is still the unedited Flutter-CLI boilerplate ("A new Flutter
-project... starting point"), and `client/medium/` has no `README.md` at all. Neither was in scope
-for this session's `docs/` → `memory/` migration (that covered root-level product docs only), but
-both are real gaps in the same spirit.
-
-**How.** Give `client/app/README.md` real content (or replace it with a pointer to the root
-`README.md`/`AGENTS.md`, matching how `core/README.md` and `web-demo/README.md` already work);
-decide whether `client/medium/` needs its own `README.md` or is adequately covered by
-[`memory/medium.md`](memory/medium.md). More generally: treat this as a standing reminder — any new
-doc that describes *how something currently works* belongs in `memory/`, not scattered in a new
-`docs/*.md` file, per this session's migration precedent.
-
-**Why.** A generic, unedited boilerplate README next to two other sub-projects with real,
-maintained ones is exactly the kind of inconsistency a stranger arriving cold would trip over.
-
-### A8. Migrate `docs/superpowers/`'s design specs and implementation plans into `memory/`
-
-**What.** Fold the content of `docs/superpowers/specs/*.md` and `docs/superpowers/plans/*.md` (10
-files) into `memory/`, rather than leaving them in a separate, un-migrated archive. This session
-deliberately left `docs/superpowers/` untouched (treated as a skill-owned archive, referenced not
-absorbed) — that call is reversed: it belongs in `memory/` like everything else that describes how
-things work or are planned to work.
-
-**How.** Same three-way split this session already used for `docs/design-decisions.md` and
-`docs/roadmap.md`: still-current reasoning into the relevant `memory/*.md` file, "what shipped and
-when" into `CHANGELOG.md`, not-yet-executed work into `TODO.md`. Concretely, one pass per file:
-
-- The design specs for already-shipped features (`2026-09-01-okru-prototype-design.md`,
-  `2026-09-08-markov-boundary-and-filler-design.md`, `2026-09-08-markov-seed-broadening-design.md`,
-  and their matching `plans/*.md`) are largely superseded by what's already in
-  [`memory/wire-protocol.md`](memory/wire-protocol.md), [`memory/medium.md`](memory/medium.md), and
-  `CHANGELOG.md` — check each for anything not yet captured before retiring the spec/plan itself.
-- `2026-08-27-messaging-protocol-design.md` (still draft, describes the not-yet-implemented
-  directional-key/rotation crypto scheme) belongs with
-  [`memory/handshake.md`](memory/handshake.md)'s "Target spec" section, which already summarizes it
-  but doesn't yet fully absorb it.
-- The three unexecuted Dart plans (`2026-08-30-handshake-dart.md`, `2026-08-30-protocol-core-dart.md`,
-  `2026-08-31-key-rotation-dart.md`) stay pointed at from `TODO.md` D6 until `client/`'s protocol
-  port is actually built — at that point they either execute (and their content moves to a new
-  `memory/dart-protocol.md`, per `memory/README.md`'s growth table) or get retired into
-  `CHANGELOG.md`/`rejected-ideas.md`.
-- Decide, in the same pass, where **future** specs/plans from the superpowers
-  brainstorming/writing-plans skill workflow should land — those skills are hardcoded to write to
-  `docs/superpowers/specs|plans/YYYY-MM-DD-*.md`, so this migration is not a one-time cleanup unless
-  that destination is also addressed (e.g. a finishing-a-feature step that folds the spec/plan into
-  `memory/`/`CHANGELOG.md` and deletes the original, every time).
-
-**Why.** `docs/superpowers/` content genuinely describes current or planned system behavior — the
-exact thing `memory/` exists for — and leaving it in a second, un-indexed location is the same
-duplication-of-truth problem this session's migration was meant to eliminate everywhere else.
+| A7. Audit `client/`'s READMEs | Done — real content for `client/app/README.md` (was Flutter-CLI boilerplate) and new `client/medium/README.md` (had none) | `CHANGELOG.md` |
+| A6. Root `README.md`'s License placeholder | Done — owner chose proprietary/all-rights-reserved, stated explicitly | `CHANGELOG.md` |
+| A8. Migrate `docs/superpowers/` into `memory/` | Done — 6 already-shipped files retired (content already covered, plus 3 new `rejected-ideas.md` entries); 1 draft spec and 3 unexecuted plans deliberately kept; found and fixed 2 more dangling doc-links in `core/sources/markov.py`; added a house rule for future specs/plans | `CHANGELOG.md` |
 
 ---
 
@@ -111,7 +49,21 @@ Nothing batched here yet — no expensive, infrequent event has been identified 
 
 ## §C BLOCKED — waiting on time or data
 
-Nothing here — every open item below can be advanced by effort whenever it's picked up.
+### C1. VK ID app registration needed to confirm three open OAuth/API assumptions
+
+**Unblock condition:** a real VK ID app is registered (`client_id` and redirect URI) and a live
+login and `graph.user.messages` round trip is run between two real accounts.
+
+Three things currently can't be validated without that: (1) `client_id` is a literal
+`'PLACEHOLDER_APP_ID'` in `client/app/lib/main.dart:19`; (2) the OAuth `scope` string requested at
+authorize-time (`client/medium/lib/src/vk_id_oauth.dart`'s `buildAuthorizeUrl`) is `'email'`, not a
+real messaging permission — the correct scope name was never confirmed against VK ID's actual scope
+list; (3) whether `graph.user.messages` requires the two accounts to already be OK.ru contacts before
+messaging cold (a `group.isMessagesAllowed`-style gate exists elsewhere in the API, suggesting one
+might apply here too) is untested — `client/medium/lib/src/odnoklassniki_medium.dart` has no handling
+for this either way. All three were flagged as open risks in the (now-retired) Odnoklassniki
+prototype design spec; none are blocking further `client/` development, since everything else in
+the medium wrapper is unit-tested against mocked HTTP.
 
 ---
 

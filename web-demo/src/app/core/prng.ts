@@ -51,10 +51,11 @@ const FNV_PRIME = 0x01000193;
 
 /**
  * Deterministically combine `seed` with `text` into a new 32-bit seed, via FNV-1a. Mirrors the
- * role of core/sources/crypto.py's `derive_key` for the Markov filler-completion design
- * (docs/superpowers/specs/2026-09-08-markov-boundary-and-filler-design.md) without needing a real
- * hash/crypto dependency in this demo -- fine here since what it seeds only ever drives non-secret
- * cosmetic filler, never anything that needs to resist prediction.
+ * role of core/sources/crypto.py's `derive_key` for the Markov filler-completion and seed-gating
+ * mechanisms (see memory/wire-protocol.md) without needing a real hash/crypto dependency in this
+ * demo -- fine here since what it seeds only ever drives non-secret cosmetic filler (or, for the
+ * permutation use, a value that gates decoding but still carries no secret of its own), never
+ * anything that needs to resist prediction.
  */
 export function chainSeed(seed: number, text: string): number {
   let hash = (seed ^ FNV_OFFSET_BASIS) >>> 0;

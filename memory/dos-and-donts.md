@@ -61,6 +61,11 @@ When a doc grows, look for what to delete before what to add.
 Adding a `memory/` doc is three edits in one commit: the file, a row in [`README.md`](README.md), and a row in [`keywords.md`](keywords.md).
 Deleting one is the same three in reverse.
 
+**DO fold a shipped feature's `docs/superpowers/specs|plans/*.md` into `memory/`/`CHANGELOG.md` once it ships, and delete the original.**
+The superpowers brainstorming/writing-plans skills are hardcoded to write new design specs and implementation plans there — that's fine as a staging area during design and implementation, but once a feature actually ships, its content belongs in `memory/` (current-state reasoning), `CHANGELOG.md` (what happened), and `rejected-ideas.md` (what was considered and rejected along the way), not left duplicated in a second, un-indexed location.
+*Because:* this session found 6 already-shipped features' specs/plans still sitting in `docs/superpowers/` months after landing, alongside 3 genuinely-unexecuted Dart plans and one still-draft target-protocol spec — the first group needed retiring, the other two didn't, and nothing marked which was which.
+Still-draft specs describing not-yet-implemented work (e.g. a target crypto scheme with no code behind it yet) are the one exception: absorbing them fully isn't earned until real implementation begins — keep them in place, and expand the relevant `memory/*.md` file only far enough to record the headline facts, not a full transcription (see `memory/handshake.md`'s "Target spec" section for the shape this takes).
+
 **DO give every `memory/` doc a `*keywords:*` line** directly under its title, holding the symbols someone would grep.
 
 **DO verify before committing a documentation change:**

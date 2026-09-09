@@ -8,6 +8,89 @@ Open questions live in [`../TODO.md`](../TODO.md); this file is for settled ones
 Each entry states what was proposed, what was measured, and what new evidence would be needed to reopen it.
 "Rejected" here means *tried and did not pay*, or *rejected by the owner on design grounds* — not "never tried".
 
+## Reconstruct Markov sentence boundaries by scanning for periods (2026-09-08)
+
+*keywords: `___END__`, period, sentence boundary, markov_eng.json, markov_rus.json, newline*
+
+**Idea.**
+The Markov text disguise renders sentence boundaries as a literal `___END__` token — an obvious
+tell. Since real sentences already end in a period most of the time, drop the explicit token
+entirely and reinsert it at decode time by scanning for periods instead.
+
+**What was tried.**
+Checked directly against both frozen models before writing any code. English: 33 Markov states end
+in a real period (`Mr.`, `Mrs.`, `Dr.`, `Mt.`, `Ms.`) where `___END__` is never offered as a
+continuation — always followed by a real word, never a sentence break; one state where `___END__`
+*is* offered ends in `:`, not a period. Russian: 195 states end in a literal period with `___END__`
+not offered at all (dialogue attribution mid-sentence, e.g. `сказала мама.` continuing into more
+text), plus 13 END-reachable states ending in `»`/`:`/`‽`.
+
+**Why rejected.**
+A period is neither necessary nor sufficient for "this is where `___END__` was chosen," in either
+language's actual training data. Guessing a boundary at an abbreviation would desync the decoder's
+Markov walk from a state the encoder was never in — a hard decode failure, not a cosmetic
+imperfection. Replaced with rendering `___END__` as a plain `\n` instead (safe because no token in
+either frozen model contains an embedded newline, checked structurally via how the training corpus
+and tokenizer both work, not just empirically) — see `memory/wire-protocol.md`.
+
+**What would reopen it.**
+A retrained model verified to have zero period-ending non-`___END__`-eligible states in both
+languages — unlikely to ever hold given how abbreviations work in natural language, and not worth
+re-checking without a specific reason to believe the corpus changed fundamentally.
+
+## Seed-derived rotation/offset, and XOR'd ciphertext, for gating Markov real-content decoding (2026-09-08)
+
+*keywords: candidate_ranges, permutation, OVERLAP-style rotation, XOR keystream, seed-broadening*
+
+**Idea.**
+Two alternatives considered, alongside the chosen design, for making the Markov disguise's seed
+gate real-content decoding (not just the cosmetic filler tail): (B) a seed-derived rotation/offset
+of each state's candidate order, instead of a full shuffle; (C) XOR the input ciphertext bits with
+a seed-derived keystream before arithmetic-coding them, instead of touching candidate order at all.
+
+**What was tried.**
+Neither was built — both rejected on design grounds before implementation, in favor of the
+seed-derived full-permutation approach that shipped (see `memory/wire-protocol.md`).
+
+**Why rejected.**
+(B) is a much smaller permutation space per state than a full shuffle, and no clearer to reason
+about — strictly dominated by the chosen approach, no scenario where it would be preferable.
+(C) The input is already AEAD ciphertext, indistinguishable from random — XOR-ing it again adds no
+real defense and just moves the seed-dependency into the wrong layer, conflating the disguise
+encoding (which should only reshape bytes into atoms, never touch their meaning) with the crypto
+layer that already owns this property. The chosen approach keeps the seed-dependency a property of
+the *encoding* itself, matching how the image disguise's seed is a property of its texture
+generator, not of the plaintext.
+
+**What would reopen it.**
+Neither approach solves a problem the chosen one doesn't — nothing currently would revisit either
+without a fundamentally different requirement (e.g. a candidate-order permutation being ruled out
+for the image disguise for a reason that also applies to the Markov case).
+
+## Replay-detection on the target-spec certificate's transmitted nonce (2026-08-27)
+
+*keywords: certificate, bootstrap_key, header_nonce, replay, messaging-protocol-design*
+
+**Idea.**
+In the not-yet-implemented target protocol spec (see `memory/handshake.md`'s "Target spec"
+section), the handshake certificate's nonce can't be counter-derived the way ordinary data
+messages' nonces are, so it's transmitted once per certificate. Rejecting a *repeated* nonce value
+looked like a cheap extra safety net against replay.
+
+**What was tried.**
+Not built — rejected on design grounds during the spec's own design phase, before implementation.
+
+**Why rejected.**
+It doesn't add real protection: an adversary capable of forging a malicious certificate at all can
+just generate a fresh keypair and a fresh nonce rather than replaying an old one, and
+`bootstrap_key` being derivable by anyone who knows both parties' IDs means nothing stops that
+regardless. A repeated-nonce check would only ever catch an adversary who had no reason to vary
+the nonce in the first place.
+
+**What would reopen it.**
+A scenario where forging a certificate is possible but generating a fresh nonce specifically is
+not — no such scenario is known.
+
 ## Derive the header/ack AEAD nonce instead of transmitting it (2026-09-08)
 
 *keywords: derive_nonce, hyperchunk_id, HyperchunkHeader, HyperchunkAck, _ack_nonce, selective retransmission*

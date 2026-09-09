@@ -42,6 +42,70 @@ entry of the new cycle.
 
 ---
 
+## 2026-09-09 — `docs/superpowers/`'s shipped-feature specs and plans retired into `memory/`, closing TODO A8
+
+*keywords: rejected-ideas.md, target spec, dart-protocol.md, C1, pair-specific bootstrap_key*
+
+**6 of `docs/superpowers/`'s 10 design specs/plans described features that had already shipped —
+retired now that their content is properly indexed elsewhere; the other 4 were kept, deliberately,
+for two different reasons.** This session's earlier docs migration left `docs/superpowers/`
+untouched entirely, treating it as a separate skill-owned archive; reversed here, since its content
+genuinely describes current or planned system behavior, the exact thing `memory/` exists for.
+
+**What changed in the code.**
+Deleted: the okru-prototype, markov-boundary-and-filler, and markov-seed-broadening spec+plan pairs
+(6 files) — verified each against `memory/wire-protocol.md`, `memory/medium.md`, and existing
+`CHANGELOG.md` entries first, and added 3 new `memory/rejected-ideas.md` entries for design-stage
+alternatives that weren't recorded anywhere yet (period-based Markov sentence-boundary
+reconstruction, two rejected approaches to Markov seed-gating, and the target spec's rejected
+certificate replay-detection). `memory/handshake.md`'s "Target spec" section gained the load-bearing
+facts the messaging-protocol-design.md draft has that it didn't yet (pair-specific `bootstrap_key`,
+key-selection-on-receive with no explicit message-type field). Found and fixed two more dangling
+`docs/superpowers/specs/...` links in `core/sources/markov.py`'s docstring (missed by the earlier
+A4 pass — outside what `verify_memory.py` scans, since it only checks `.md` files) and one stale
+comment in `web-demo/src/app/core/prng.ts`. Also surfaced and filed: `TODO.md` C1 (three OAuth/API
+assumptions from the now-deleted Odnoklassniki design spec that were never actually verified against
+the real API — `client_id` is still a literal placeholder in `client/app/lib/main.dart`), now also
+documented as known gaps in `memory/medium.md`.
+
+**What it means, and what was decided.**
+Kept in place, deliberately: `2026-08-27-messaging-protocol-design.md` (still draft, 485 lines,
+describes the not-yet-implemented rotation crypto scheme — absorbing it fully isn't earned until
+real implementation begins, per `memory/README.md`'s own growth criteria; only its headline facts
+were pulled into `memory/handshake.md`) and the three unexecuted Dart protocol plans (referenced
+from `TODO.md` D6, to execute or retire only once `client/`'s protocol port actually starts).
+`memory/dos-and-donts.md` gained a new house rule: fold a shipped feature's spec/plan into
+`memory/`/`CHANGELOG.md` and delete the original as part of shipping it, not months later — this
+session found 6 that had waited that long. `core/` tests (174) and lint, and `web-demo/` tests (55)
+and lint, all still pass.
+
+## 2026-09-09 — Root `README.md`'s License section resolved, closing TODO A6
+
+*keywords: license, proprietary, all rights reserved*
+
+**`README.md`'s License section literally read `TODO!` — no license had ever been chosen.** Owner
+decided: proprietary, all rights reserved, no license file — stated explicitly in `README.md`
+rather than left as an unresolved placeholder. TODO item A6 is closed.
+
+## 2026-09-09 — `client/app` and `client/medium` both get real READMEs, closing TODO A7
+
+*keywords: client/app/README.md, client/medium/README.md*
+
+**`client/app/README.md` was still the unedited Flutter-CLI boilerplate, and `client/medium/` had no
+README at all** — the odd one out next to `core/README.md` and `web-demo/README.md`, both real and
+maintained.
+
+**What changed in the code.**
+`client/app/README.md` now describes what the app actually does (VK ID/Odnoklassniki login, a
+conversation screen) and, explicitly, what it doesn't do yet (no encryption/chunking/disguise — the
+real airwire protocol isn't wired in, tracked at `TODO.md` D6). `client/medium/README.md` (new)
+documents the package's contents and points at `memory/medium.md` for the full `Medium` contract.
+Both link to `../../memory/commands.md` and `../../.github/workflows/client.yml` for setup/CI.
+
+**What it means, and what was decided.**
+`flutter analyze`/`dart analyze` both still clean, `verify_memory.py` 0 errors, full-repo
+`markdownlint-cli2` 0 issues (21 files, up from 20). TODO item A7 is closed.
+
 ## 2026-09-09 — Full repo coding-guidelines review, closing TODO A3
 
 *keywords: import json, _load_model, markovify, grpc_tools, historical-narrative docstrings*

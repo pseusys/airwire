@@ -49,3 +49,14 @@ Odnoklassniki was chosen because it's the only evaluated platform offering real 
 real-user-scoped messaging without a Terms-of-Service conflict — see the "three different meanings
 of acting as a real user" distinction in the rejected candidates for why that mattered more than raw
 reach.
+
+## Known gaps in the Odnoklassniki implementation
+
+Three things remain unverified against the real API — all unit-testable-against-mocks work is done;
+what's left needs a real registered VK ID app and a live login. See [`../TODO.md`](../TODO.md) C1.
+
+- `client/app/lib/main.dart`'s `vkIdClientId` is a literal placeholder, not a registered app ID.
+- The OAuth `scope` requested in `vk_id_oauth.dart`'s `buildAuthorizeUrl` (`'email'`) is not a real
+  messaging permission — the correct scope name was never confirmed against VK ID's own scope list.
+- Whether `graph.user.messages` requires the two accounts to already be OK.ru contacts before
+  messaging cold is untested; `odnoklassniki_medium.dart` has no handling for this either way.

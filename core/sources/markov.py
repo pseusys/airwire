@@ -57,18 +57,18 @@ Known limitations, worth a second look independently of this module:
   see `sources/corpus.py`), so `\n` is unambiguous as a boundary marker in a way a period isn't --
   a period *is* a real character inside real vocabulary words (`Mr.`, `Dr.`), which is exactly why
   reinserting boundaries by scanning for periods was tried and rejected; see
-  [the design doc](../../docs/superpowers/specs/2026-09-08-markov-boundary-and-filler-design.md)
-  for the full evidence. Bonus: a multi-line disguised message is unremarkable, unlike a literal
-  `___END__` string ever was.
+  [`memory/rejected-ideas.md`](../../memory/rejected-ideas.md) for the full evidence. Bonus: a
+  multi-line disguised message is unremarkable, unlike a literal `___END__` string ever was.
 - Resolved: the very last sentence of a hyperslice's rendered text used to just trail off mid-walk
   whenever the real ciphertext bits ran out before a sentence naturally finished -- unlike every
   sentence before it, which always ends in a real, bit-driven `___END__`/`\n`. `_finish_sentence`
   now completes it with plausible, non-secret filler words (weighted by the same corpus
   frequencies, picked by a seeded PRNG rather than the arithmetic coder) whenever this happens.
   Decode needs no changes for this: it already stops consuming words the moment `length` bytes are
-  recovered, so the filler tail is already invisible to it, real or not. See the design doc linked
-  above for why the seed is chained across each real sentence's own content
-  (`derive_key(seed, sentence_bytes, ...)`) rather than derived from `nonce` alone.
+  recovered, so the filler tail is already invisible to it, real or not. See
+  [`memory/wire-protocol.md`](../../memory/wire-protocol.md) for why the seed is chained across
+  each real sentence's own content (`derive_key(seed, sentence_bytes, ...)`) rather than derived
+  from `nonce` alone.
 - Resolved: the nonce used to gate only the cosmetic filler tail (previous point);
   every state's candidate order is now also shuffled by a nonce-derived permutation
   (`_permuted_candidates`) before `candidate_ranges` assigns bit-range boundaries to it, so the
@@ -77,10 +77,10 @@ Known limitations, worth a second look independently of this module:
   recognizes every word as a valid continuation (membership doesn't depend on order) but recovers
   the wrong bits, failing downstream at the AEAD tag check instead of in this module -- the same
   failure shape a wrong image seed already has. See
-  [the design doc](../../docs/superpowers/specs/2026-09-08-markov-seed-broadening-design.md) for
-  why this doesn't make the scheme cryptographically secure (it's still deterministic,
-  unauthenticated, and unproven) -- it only raises the cost of extracting a payload from "trivial"
-  to "brute-force the seed space," the same informal protection level image's seed already gives.
+  [`memory/wire-protocol.md`](../../memory/wire-protocol.md) for why this doesn't make the scheme
+  cryptographically secure (it's still deterministic, unauthenticated, and unproven) -- it only
+  raises the cost of extracting a payload from "trivial" to "brute-force the seed space," the same
+  informal protection level image's seed already gives.
 - Resolved: `MARKOV_ENG` and `MARKOV_RUS` each have their own `ChunkEncoding` identifier
   (`hyperchunk.proto`), so the header-driven auto-detection in `unpack_hyperchunk` picks the
   correct language on its own -- no more out-of-band agreement needed than any other encoding
