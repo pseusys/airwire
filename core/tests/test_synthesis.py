@@ -50,11 +50,44 @@ def test_decode_rejects_a_patch_not_in_the_library(texture: np.ndarray) -> None:
     data = token_bytes(30)
     canvas = synthesis.encode(data, texture)
     tampered = canvas.copy()
-    # Corrupt one pixel inside the first gap row (patch-row index 1) so it no longer matches
-    # anything in the source texture's patch library.
-    tampered[synthesis.DEFAULT_PATCH_SIZE, 0, 0] ^= 0xFF
+
+    # Find a gap cell (not an anchor) to corrupt -- anchor content isn't validated on decode by
+    # design (same as seed-row content in the row-alternating mechanism): it's trusted and used
+    # as-is for neighboring gap cells' cost computation, never checked against the guide texture.
+    period = texture.shape[1] // synthesis.DEFAULT_PATCH_SIZE
+    mask = synthesis._anchor_mask(synthesis._mask_seed(texture), period, synthesis.MIN_ANCHOR_DISTANCE)
+    total_rows = canvas.shape[0] // synthesis.DEFAULT_PATCH_SIZE
+    row, col = next((r, c) for r in range(total_rows) for c in range(synthesis.DEFAULT_CANVAS_WIDTH) if not synthesis._is_anchor(mask, r, c))
+
+    r0, c0 = row * synthesis.DEFAULT_PATCH_SIZE, col * synthesis.DEFAULT_PATCH_SIZE
+    tampered[r0, c0, 0] ^= 0xFF
     with pytest.raises(ValueError):
         synthesis.decode(tampered, texture, len(data))
+
+
+def test_anchor_mask_is_deterministic_and_periodic() -> None:
+    mask_a = synthesis._anchor_mask(seed=7, period=16, min_distance=synthesis.MIN_ANCHOR_DISTANCE)
+    mask_b = synthesis._anchor_mask(seed=7, period=16, min_distance=synthesis.MIN_ANCHOR_DISTANCE)
+    assert np.array_equal(mask_a, mask_b)
+    assert mask_a.shape == (16, 16)
+    # _is_anchor wraps modulo the mask's own period, so a position many periods out still resolves.
+    assert synthesis._is_anchor(mask_a, 3, 5) == synthesis._is_anchor(mask_a, 3 + 16 * 4, 5 + 16 * 7)
+
+
+def test_anchor_mask_density_and_spacing() -> None:
+    # No two anchors closer than MIN_ANCHOR_DISTANCE (toroidal), and density lands in a sane
+    # band -- not empty, not clumped, not exactly the old row design's 50% (see the module's
+    # own docstring and the 2026-09-09 CHANGELOG.md entry for why this is expected to differ).
+    period = 16
+    for seed in range(5):
+        mask = synthesis._anchor_mask(seed, period, synthesis.MIN_ANCHOR_DISTANCE)
+        anchors = list(zip(*np.nonzero(mask)))
+        assert 0.25 < len(anchors) / mask.size < 0.5
+        for i, (row_a, col_a) in enumerate(anchors):
+            for row_b, col_b in anchors[i + 1 :]:
+                row_gap = min(abs(row_a - row_b), period - abs(row_a - row_b))
+                col_gap = min(abs(col_a - col_b), period - abs(col_a - col_b))
+                assert row_gap * row_gap + col_gap * col_gap >= synthesis.MIN_ANCHOR_DISTANCE**2
 
 
 def test_patch_library_rejects_non_square_texture() -> None:

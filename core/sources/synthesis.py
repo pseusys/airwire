@@ -2,50 +2,59 @@
 Disguises ciphertext as an abstract, patterned image via reversible patch-based texture
 synthesis, using the same arithmetic coder (`sources/arithmetic.py`) built for
 `sources/markov.py`'s text disguise -- adapted from Wu & Wang's "Steganography Using Reversible
-Texture Synthesis" (IEEE TIP, 2015), with two deliberate departures from their design (see
-design-decisions.md for the full story of why):
+Texture Synthesis" (IEEE TIP, 2015), with one deliberate departure from their design (see
+`memory/wire-protocol.md` for the full story): Wu & Wang also recover the exact original source
+texture from the stego image, because in their setting the texture itself is secret content.
+Here
+the source texture is a public, regenerable "codebook" (see `sources/textures.py`) that both ends
+already have via a shared seed, so that whole recovery mechanism -- and the index-table bookkeeping
+it needs -- is simply not needed and isn't built.
 
-- Wu & Wang scatter whole source patches at arbitrary positions and fill irregularly-shaped gaps
-  between them; this module uses a fixed, regular layout instead -- alternating **seed rows**
-  (whole, untouched patches from the source texture, placed by a deterministic rule, carrying no
-  secret data) and **gap rows** (synthesized, one patch at a time, secret-bit-driven). Simpler to
-  reason about and implement, at the cost of being less space-efficient than an optimal irregular
-  packing.
-- Wu & Wang also recover the exact original source texture from the stego image, because in their
-  setting the texture itself is secret content. Here the source texture is a public, regenerable
-  "codebook" (see `sources/textures.py`) that both ends already have, so that whole recovery
-  mechanism -- and the index-table bookkeeping it needs -- is simply not needed and isn't built.
+Two layout mechanisms exist, chosen per texture flavor via `position_guided`:
 
-Every row of the canvas, seed or gap, corresponds to a real row of one continuous, periodic
-source texture (`row % texture_height_in_patches`, see `_guide_patch`) -- not to an arbitrary
-placeholder. Seed rows render that row's true content exactly. For three of the four texture
-flavors (`position_guided=True` -- everything except `attractor`), each **gap row** cell is filled
-by ranking every patch in the source texture's patch library by how close it is to the *true*
-patch this same periodic texture holds at that exact position, plus its left edge against the
-already-chosen gap patch to its left, if any -- so a gap patch is always pulled toward the real
-image that would be there anyway, which is what lets large-scale structure (a Voronoi cell, a
-reaction-diffusion tube) survive across a whole row, not just at one edge. `attractor` has no
-exploitable 2-D positional structure (confirmed by direct tiling tests -- see
-`memory/rejected-ideas.md`), so it keeps the original scheme instead: ranking by edge match against
-the seed rows immediately above and below, plus the left neighbor. Match quality (sum of squared
-pixel differences) becomes an integer weight -- exact integer arithmetic throughout, never floating
-point, for the same reason `sources/markov.py` avoids it: the arithmetic coder needs bit-exact
-agreement between encode and decode on any device. The arithmetic coder then picks which patch to
-place the same way it picks words in the text case: secret bits select among the weighted
-candidates, not "the best match."
+- **Scattered anchor layout** (`value_noise`, `voronoi`, `reaction_diffusion`): every canvas
+  position is either an **anchor** (real, untouched texture content at that exact position,
+  carrying no secret data) or a **gap** (synthesized, secret-bit-driven), per a deterministic,
+  seed-derived 2-D anchor mask (`_anchor_mask`) -- not confined to whole rows, which is what Wu &
+  Wang's "scatter" idea is actually for, and what removes the visible seed/gap row-banding the
+  row-alternating layout has.
+Gap cells are filled one patch at a time, in a plain row-major raster
+  scan, by ranking `PatchLibrary` candidates by how close a whole-patch match they are to the
+  texture's true content at that exact position -- plus, where available, their edge agreement
+  with the already-resolved neighbor above and to the left (never below or to the right -- those
+  aren't resolved yet in raster order).
+`PatchLibrary` also supports drawing candidates from
+  *overlapping*, pixel-shifted crops (its `stride` parameter) rather than only the non-overlapping
+  tile grid, matching the other half of Wu & Wang's technique -- measured directly and not adopted
+  as the default (see `DEFAULT_CANDIDATE_STRIDE` below and `memory/rejected-ideas.md`), but kept as
+  a real, working, still-available option.
+The scattered placement itself is what removes the
+  banding; see the 2026-09-09 CHANGELOG.md entries for the before/after evidence.
+- **Row-alternating layout** (`attractor` only): the original mechanism -- alternating seed rows
+  (whole, untouched patches, one full row at a time) and gap rows (filled one patch at a time,
+  scored only against the seed rows immediately above/below and the already-chosen patch to the
+  left).
+`attractor` has no exploitable 2-D positional structure to place scattered anchors by (a
+  sparse chaotic-orbit density histogram, not a spatially periodic field -- confirmed by direct
+  tiling tests), so it stays on this simpler, already-adequate mechanism.
+
+Match quality (sum of squared pixel differences) becomes an integer weight -- exact integer
+arithmetic throughout, never floating point, for the same reason `sources/markov.py` avoids it:
+the arithmetic coder needs bit-exact agreement between encode and decode on any device.
+The
+arithmetic coder then picks which patch to place the same way it picks words in the text case:
+secret bits select among the weighted candidates, not "the best match."
 
 Known limitations, worth a second look independently of this module:
 
-- The regular seed/gap row layout is a visible artifact once you know to look for it (every other
-  row is literally untouched source texture). Wu & Wang's irregular scatter hides this better but
-  is substantially more complex to implement; not attempted here.
-- `attractor`'s gap rows are still purely local (immediate edge pixels only), so its large-scale
-  behavior is unchanged from the original design -- it was already adequate under the local-only
-  cost function, unlike `voronoi`/`reaction_diffusion`, which is why it wasn't included in the
-  position-guided mechanism rather than needing a fallback for a regression.
+- Each gap cell is still an independently-scored choice among discrete candidates, so a cell can
+  still visibly mismatch its neighbors even with the position-guided target term -- the scattered
+  layout spreads this over the whole canvas instead of confining it to alternating rows, which is
+  a real improvement, but doesn't make each individual gap cell's match any better than before.
 """
 
 import base64
+import hashlib
 import io
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -62,14 +71,32 @@ DEFAULT_PATCH_SIZE = 8
 DEFAULT_CANVAS_WIDTH = 16
 # Must equal DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE: the source texture has to be exactly as
 # wide, in patches, as the canvas, or _guide_patch's row/col lookup stops corresponding to a real
-# position in the texture (see memory/wire-protocol.md and memory/rejected-ideas.md).
+# position in the texture (see memory/wire-protocol.md).
 DEFAULT_TEXTURE_SIZE = DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE
+
+# Excludes only orthogonally-adjacent anchors (squared toroidal distance of 1) -- the natural,
+# maximal blue-noise packing density on this small a grid, empirically ~36-39% anchors (measured
+# across seeds), not a value tuned to hit a specific target. See the 2026-09-09 CHANGELOG.md entry.
+MIN_ANCHOR_DISTANCE = 1.1
+
+# Every unique patch-size-square window starting at a pixel offset that's a multiple of this
+# stride, wrapped periodically. Measured directly against smaller strides (1, 2, 4) before picking
+# this: the overlapping candidates a smaller stride adds showed no consistent quality win across
+# texture flavors (better for one, worse for another, inconsistent per-flavor optima) while costing
+# up to ~90x more wall-clock time per message -- not worth it for this arithmetic-coder-driven,
+# weighted-random selection (the same lesson the OVERLAP experiment already found: a richer
+# candidate pool doesn't reliably help a weighted-random pick the way it would a strict minimizer).
+# See memory/rejected-ideas.md's "Overlapping candidate patches" entry for the full measurements.
+DEFAULT_CANDIDATE_STRIDE = DEFAULT_PATCH_SIZE
 
 
 class PatchLibrary:
-    """The fixed palette of candidate patches a source texture is divided into."""
+    """The candidate palette a source texture is divided into. `stride=patch_size` (the default)
+    reproduces the original non-overlapping tile grid; a smaller stride yields overlapping,
+    pixel-shifted candidates -- a much finer-grained palette, at the cost of a bigger library to
+    build and score."""
 
-    def __init__(self, texture: np.ndarray, patch_size: int) -> None:
+    def __init__(self, texture: np.ndarray, patch_size: int, stride: Optional[int] = None) -> None:
         size = texture.shape[0]
         if texture.shape[0] != texture.shape[1] or size % patch_size != 0:
             raise ValueError(f"Texture must be square with a side length that's a multiple of patch_size ({patch_size})!")
@@ -77,18 +104,19 @@ class PatchLibrary:
         self.patch_size = patch_size
         self.patches: List[np.ndarray] = []
         lookup: Dict[bytes, int] = {}
-        for row in range(0, size, patch_size):
-            for col in range(0, size, patch_size):
-                patch = texture[row : row + patch_size, col : col + patch_size].copy()
+        for row in range(0, size, stride or patch_size):
+            for col in range(0, size, stride or patch_size):
+                patch = _periodic_extract(texture, row, col, patch_size)
                 key = patch.tobytes()
                 if key in lookup:
-                    continue  # flat/repeated regions (e.g. Voronoi cell interiors) can duplicate; skip.
+                    continue  # flat/repeated regions, or overlapping crops that coincide; skip.
                 lookup[key] = len(self.patches)
                 self.patches.append(patch)
 
         if len(self.patches) < 2:
             raise ValueError("Source texture yields fewer than 2 distinct patches; pick a larger or more varied texture!")
         self._lookup = lookup
+        self.patches_array = np.stack(self.patches)  # (N, patch_size, patch_size, 3) uint8, for vectorized scoring.
 
     def __len__(self) -> int:
         return len(self.patches)
@@ -100,16 +128,75 @@ class PatchLibrary:
             raise ValueError("Patch doesn't match any entry in this source texture's patch library!") from None
 
 
+def _periodic_extract(texture: np.ndarray, row0: int, col0: int, patch_size: int) -> np.ndarray:
+    """Crop a patch_size-square window starting at pixel offset (row0, col0), wrapping each axis
+    independently modulo the texture's own size. An overlapping candidate can start at any pixel
+    offset, including ones where the window would otherwise run off the edge -- unlike the
+    always-tile-aligned crops this reduces to at stride=patch_size, which never actually need to
+    wrap mid-patch."""
+
+    size = texture.shape[0]
+    rows = [(row0 + offset) % size for offset in range(patch_size)]
+    cols = [(col0 + offset) % size for offset in range(patch_size)]
+    return texture[np.ix_(rows, cols)]
+
+
 def _guide_patch(texture: np.ndarray, row: int, col: int, patch_size: int) -> np.ndarray:
     """The literal patch this (periodic) texture holds at canvas position (row, col) -- used to
-    render every seed row exactly (real content, no bits consumed) and, for the three
-    position-guided flavors, as the ground truth gap-row candidates are scored against. Wraps
-    modulo the texture's own patch grid, so it's well-defined for a canvas of any height, even
-    past one full texture period (see memory/wire-protocol.md)."""
+    render every anchor cell exactly (real content, no bits consumed) and, for the scattered
+    layout's gap cells, as the ground truth candidates are scored against. Wraps modulo the
+    texture's own patch grid, so it's well-defined for a canvas of any height, even past one full
+    texture period (see memory/wire-protocol.md)."""
 
     rows_per_period = texture.shape[0] // patch_size
     cols_per_period = texture.shape[1] // patch_size
-    return _extract_patch(texture, row % rows_per_period, col % cols_per_period, patch_size)
+    return _periodic_extract(texture, (row % rows_per_period) * patch_size, (col % cols_per_period) * patch_size, patch_size)
+
+
+def _mask_seed(texture: np.ndarray) -> int:
+    """A deterministic seed for the anchor mask, derived from the texture's own content -- so
+    encode and decode agree without needing the original integer seed threaded through (only the
+    regenerated texture array is available at this layer). Not a secrecy boundary: like texture
+    choice itself, the anchor mask needs no confidentiality (see memory/wire-protocol.md), so a
+    plain non-keyed hash is fine."""
+
+    digest = hashlib.blake2b(texture.tobytes(), digest_size=4).digest()
+    return int.from_bytes(digest, "big")
+
+
+def _anchor_mask(seed: int, period: int, min_distance: float) -> np.ndarray:
+    """A (period, period) boolean grid of which patch-grid positions are anchors, via deterministic
+    Poisson-disk-style dart-throwing: shuffle every cell with a seeded RNG, accept a cell if it's
+    at least min_distance from every already-accepted anchor, until no more qualify. Distance is
+    toroidal (wrapped), matching how the mask itself gets tiled modulo its own period for canvases
+    taller than one period. The domain is tiny (period^2 cells), so a plain rejection loop -- no
+    spatial-acceleration structure -- is fast enough."""
+
+    rng = np.random.default_rng(seed)
+    positions = [(row, col) for row in range(period) for col in range(period)]
+    order = rng.permutation(len(positions))
+    accepted: List[Tuple[int, int]] = []
+    mask = np.zeros((period, period), dtype=bool)
+    min_distance_sq = min_distance * min_distance
+
+    for index in order:
+        row, col = positions[index]
+        far_enough = True
+        for accepted_row, accepted_col in accepted:
+            row_gap = min(abs(row - accepted_row), period - abs(row - accepted_row))
+            col_gap = min(abs(col - accepted_col), period - abs(col - accepted_col))
+            if row_gap * row_gap + col_gap * col_gap < min_distance_sq:
+                far_enough = False
+                break
+        if far_enough:
+            accepted.append((row, col))
+            mask[row, col] = True
+
+    return mask
+
+
+def _is_anchor(mask: np.ndarray, row: int, col: int) -> bool:
+    return bool(mask[row % mask.shape[0], col % mask.shape[1]])
 
 
 def _edge_cost(a: np.ndarray, b: np.ndarray) -> int:
@@ -117,42 +204,54 @@ def _edge_cost(a: np.ndarray, b: np.ndarray) -> int:
     return int(np.sum(diff * diff))
 
 
-def _candidate_weights(library: PatchLibrary, gap_row: List[np.ndarray], texture: np.ndarray, row: int, col: int, position_guided: bool) -> List[Tuple[int, int]]:
-    """Weight every library patch by how well it would fill gap-row position (row, col), plus its
-    left edge against the already-chosen gap patch to its left, if any (comparing a wider overlap
-    region instead of just the touching row of pixels was tried and measurably made this worse,
-    not better -- see memory/rejected-ideas.md's OVERLAP entry).
+def _weights_from_costs(costs: np.ndarray) -> List[Tuple[int, int]]:
+    max_cost = int(costs.max())
+    return [(index, int(max_cost - cost) + 1) for index, cost in enumerate(costs)]
 
-    Position-guided flavors (`position_guided=True`) score the *whole patch* against the true
-    content this periodic texture holds at exactly this position -- always known, since it's a
-    pure function of position and the shared seed, not of anything already placed -- which is what
-    lets large-scale structure (a Voronoi cell, a reaction-diffusion tube) survive: every gap
-    patch is pulled toward the real image that would be there anyway, not just towards agreeing
-    with its immediate neighbors. The one flavor without exploitable positional structure
-    (`attractor`) keeps the original, purely local edge-vs-neighboring-seed-rows cost instead."""
 
+def _candidate_weights_scattered(library: PatchLibrary, texture: np.ndarray, row: int, col: int, above: Optional[np.ndarray], left: Optional[np.ndarray]) -> List[Tuple[int, int]]:
+    """Weight every library patch by how close a whole-patch match it is to the texture's true
+    content at this exact position -- always known, since it's a pure function of position and the
+    shared seed, not of anything already placed -- plus its top/left edges against the
+    already-resolved neighbors above and to the left, when they exist (never below or right --
+    those aren't resolved yet in this raster-order walk). Vectorized over the whole candidate pool
+    at once, since the overlapping library can hold thousands of candidates."""
+
+    target = _guide_patch(texture, row, col, library.patch_size).astype(np.int64)
+    patches = library.patches_array.astype(np.int64)
+    costs = np.sum((patches - target) ** 2, axis=(1, 2, 3))
+
+    if left is not None:
+        left_edge = left[:, -1, :].astype(np.int64)
+        diff = patches[:, :, 0, :] - left_edge
+        costs = costs + np.sum(diff * diff, axis=(1, 2))
+
+    if above is not None:
+        above_edge = above[-1, :, :].astype(np.int64)
+        diff = patches[:, 0, :, :] - above_edge
+        costs = costs + np.sum(diff * diff, axis=(1, 2))
+
+    return _weights_from_costs(costs)
+
+
+def _candidate_weights_rows(library: PatchLibrary, gap_row: List[np.ndarray], texture: np.ndarray, row: int, col: int) -> List[Tuple[int, int]]:
+    """`attractor`'s unchanged mechanism: rank every library patch purely by local edge agreement
+    with the seed rows immediately above and below, plus the already-chosen gap patch to its left,
+    if any (comparing a wider overlap region instead of just the touching row of pixels was tried
+    and measurably made this worse, not better -- see memory/rejected-ideas.md's OVERLAP entry)."""
+
+    above = _guide_patch(texture, row - 1, col, library.patch_size)
+    below = _guide_patch(texture, row + 1, col, library.patch_size)
     left = gap_row[col - 1] if col > 0 else None
-    patch_size = library.patch_size
 
     costs = []
-    if position_guided:
-        target = _guide_patch(texture, row, col, patch_size)
-        for patch in library.patches:
-            cost = _edge_cost(patch, target)
-            if left is not None:
-                cost += _edge_cost(patch[:, 0, :], left[:, -1, :])
-            costs.append(cost)
-    else:
-        above = _guide_patch(texture, row - 1, col, patch_size)
-        below = _guide_patch(texture, row + 1, col, patch_size)
-        for patch in library.patches:
-            cost = _edge_cost(patch[0, :, :], above[-1, :, :]) + _edge_cost(patch[-1, :, :], below[0, :, :])
-            if left is not None:
-                cost += _edge_cost(patch[:, 0, :], left[:, -1, :])
-            costs.append(cost)
+    for patch in library.patches:
+        cost = _edge_cost(patch[0, :, :], above[-1, :, :]) + _edge_cost(patch[-1, :, :], below[0, :, :])
+        if left is not None:
+            cost += _edge_cost(patch[:, 0, :], left[:, -1, :])
+        costs.append(cost)
 
-    max_cost = max(costs)
-    return [(index, (max_cost - cost) + 1) for index, cost in enumerate(costs)]
+    return _weights_from_costs(np.array(costs))
 
 
 def _rows_to_canvas(rows: List[List[np.ndarray]]) -> np.ndarray:
@@ -165,13 +264,94 @@ def _extract_patch(canvas: np.ndarray, row: int, col: int, patch_size: int) -> n
     return canvas[r0 : r0 + patch_size, c0 : c0 + patch_size]
 
 
-def encode(data: bytes, texture: np.ndarray, patch_size: int = DEFAULT_PATCH_SIZE, canvas_width: int = DEFAULT_CANVAS_WIDTH, position_guided: bool = True) -> np.ndarray:
-    """Encrypt-then-call: `data` should already be ciphertext. Returns the synthesized canvas as
-    an `(H, W, 3)` `uint8` array -- a seed row, then alternating gap/seed row pairs until `data`
-    is fully consumed, padded out to a full row with best-match (non-bit-consuming) filler if it
-    runs out mid-row, so the result is always rectangular. `canvas_width` must equal
-    `texture.shape[1] // patch_size`, or seed rows stop corresponding to real texture positions
-    (see `DEFAULT_TEXTURE_SIZE`'s docstring)."""
+def _encode_scattered(data: bytes, texture: np.ndarray, patch_size: int, canvas_width: int) -> np.ndarray:
+    library = PatchLibrary(texture, patch_size, stride=DEFAULT_CANDIDATE_STRIDE)
+    mask = _anchor_mask(_mask_seed(texture), texture.shape[1] // patch_size, MIN_ANCHOR_DISTANCE)
+    cursor = BitCursor(data)
+    rows: List[List[np.ndarray]] = []
+    low, high, width = 0, 1, 1
+    row_index = 0
+
+    while True:
+        row_patches: List[np.ndarray] = []
+        for col in range(canvas_width):
+            if _is_anchor(mask, row_index, col):
+                row_patches.append(_guide_patch(texture, row_index, col, patch_size))
+                continue
+
+            above = rows[row_index - 1][col] if row_index > 0 else None
+            left = row_patches[col - 1] if col > 0 else None
+            candidates = _candidate_weights_scattered(library, texture, row_index, col, above, left)
+
+            if cursor.remaining() <= 0:
+                best_index = max(candidates, key=lambda iw: iw[1])[0]
+                row_patches.append(library.patches[best_index])
+                continue
+
+            budget = cursor.remaining()
+            ranges, low, high, width = candidate_ranges(low, high, width, candidates, budget)
+            peeked = cursor.peek(width)
+            index, low, high = next((i, lo, hi) for i, lo, hi in ranges if lo <= peeked <= hi)
+            row_patches.append(library.patches[index])
+
+            common = common_leading_bits(low, high, width)
+            if common:
+                cursor.consume(min(common, cursor.remaining()))
+                low, high, width = strip_top_bits(low, high, width, common)
+
+        rows.append(row_patches)
+        row_index += 1
+        if cursor.remaining() <= 0:
+            break
+
+    return _rows_to_canvas(rows)
+
+
+def _decode_scattered(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int) -> bytes:
+    library = PatchLibrary(texture, patch_size, stride=DEFAULT_CANDIDATE_STRIDE)
+    canvas_width = canvas.shape[1] // patch_size
+    total_rows = canvas.shape[0] // patch_size
+    mask = _anchor_mask(_mask_seed(texture), texture.shape[1] // patch_size, MIN_ANCHOR_DISTANCE)
+
+    accumulator = BitAccumulator(length)
+    low, high, width = 0, 1, 1
+    rows: List[List[np.ndarray]] = []
+
+    for row_index in range(total_rows):
+        row_patches: List[np.ndarray] = []
+        for col in range(canvas_width):
+            patch = _extract_patch(canvas, row_index, col, patch_size)
+            row_patches.append(patch)
+
+            if _is_anchor(mask, row_index, col) or accumulator.done():
+                continue
+
+            above = rows[row_index - 1][col] if row_index > 0 else None
+            left = row_patches[col - 1] if col > 0 else None
+            candidates = _candidate_weights_scattered(library, texture, row_index, col, above, left)
+            ranges, low, high, width = candidate_ranges(low, high, width, candidates, accumulator.remaining())
+            actual_index = library.index_of(patch)
+            match: Optional[Tuple[int, int]] = next(((lo, hi) for i, lo, hi in ranges if i == actual_index), None)
+            if match is None:
+                raise ValueError(f"Patch at (row={row_index}, col={col}) is not a valid candidate at this point in the synthesis walk!")
+            low, high = match
+
+            common = common_leading_bits(low, high, width)
+            if common:
+                accumulator.append(low, width, common)
+                low, high, width = strip_top_bits(low, high, width, common)
+
+        rows.append(row_patches)
+        if accumulator.done():
+            break
+
+    return accumulator.finish()
+
+
+def _encode_rows(data: bytes, texture: np.ndarray, patch_size: int, canvas_width: int) -> np.ndarray:
+    """`attractor`'s unchanged mechanism: a seed row, then alternating gap/seed row pairs until
+    `data` is fully consumed, padded out to a full row with best-match (non-bit-consuming) filler
+    if it runs out mid-row, so the result is always rectangular."""
 
     library = PatchLibrary(texture, patch_size)
     cursor = BitCursor(data)
@@ -182,7 +362,7 @@ def encode(data: bytes, texture: np.ndarray, patch_size: int = DEFAULT_PATCH_SIZ
     while cursor.remaining() > 0:
         gap_row: List[np.ndarray] = []
         for col in range(canvas_width):
-            candidates = _candidate_weights(library, gap_row, texture, row_index, col, position_guided)
+            candidates = _candidate_weights_rows(library, gap_row, texture, row_index, col)
             if cursor.remaining() <= 0:
                 best_index = max(candidates, key=lambda iw: iw[1])[0]
                 gap_row.append(library.patches[best_index])
@@ -206,8 +386,8 @@ def encode(data: bytes, texture: np.ndarray, patch_size: int = DEFAULT_PATCH_SIZ
     return _rows_to_canvas(rows)
 
 
-def decode(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int = DEFAULT_PATCH_SIZE, position_guided: bool = True) -> bytes:
-    """Invert `encode`: recover exactly `length` bytes from a synthesized canvas."""
+def _decode_rows(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int) -> bytes:
+    """Invert `_encode_rows`."""
 
     library = PatchLibrary(texture, patch_size)
     canvas_width = canvas.shape[1] // patch_size
@@ -225,7 +405,7 @@ def decode(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int
                 gap_row.append(patch)
                 continue
 
-            candidates = _candidate_weights(library, gap_row, texture, row_index, col, position_guided)
+            candidates = _candidate_weights_rows(library, gap_row, texture, row_index, col)
             ranges, low, high, width = candidate_ranges(low, high, width, candidates, accumulator.remaining())
             actual_index = library.index_of(patch)
             match: Optional[Tuple[int, int]] = next(((lo, hi) for i, lo, hi in ranges if i == actual_index), None)
@@ -242,6 +422,26 @@ def decode(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int
         row_index += 2
 
     return accumulator.finish()
+
+
+def encode(data: bytes, texture: np.ndarray, patch_size: int = DEFAULT_PATCH_SIZE, canvas_width: int = DEFAULT_CANVAS_WIDTH, position_guided: bool = True) -> np.ndarray:
+    """Encrypt-then-call: `data` should already be ciphertext. Returns the synthesized canvas as
+    an `(H, W, 3)` `uint8` array, via the scattered-anchor layout (`position_guided=True`) or the
+    row-alternating layout (`position_guided=False`, `attractor` only) -- see the module docstring.
+    `canvas_width` must equal `texture.shape[1] // patch_size`, or positions stop corresponding to
+    real texture content (see `DEFAULT_TEXTURE_SIZE`'s docstring)."""
+
+    if position_guided:
+        return _encode_scattered(data, texture, patch_size, canvas_width)
+    return _encode_rows(data, texture, patch_size, canvas_width)
+
+
+def decode(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int = DEFAULT_PATCH_SIZE, position_guided: bool = True) -> bytes:
+    """Invert `encode`: recover exactly `length` bytes from a synthesized canvas."""
+
+    if position_guided:
+        return _decode_scattered(canvas, texture, length, patch_size)
+    return _decode_rows(canvas, texture, length, patch_size)
 
 
 def _patch_to_data_uri(patch: np.ndarray) -> str:
@@ -338,6 +538,6 @@ SYNTHESIS_VALUE_NOISE = ImageEncoding("value_noise", hyperchunk_pb2.ChunkEncodin
 SYNTHESIS_VORONOI = ImageEncoding("voronoi", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_VORONOI)
 SYNTHESIS_REACTION_DIFFUSION = ImageEncoding("reaction_diffusion", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_REACTION_DIFFUSION)
 # attractor has no exploitable 2-D positional structure (a sparse density histogram of a chaotic
-# orbit, not a spatially-generated field -- confirmed by direct tiling tests, see
-# memory/rejected-ideas.md): it keeps the original local-edge-only cost function.
+# orbit, not a spatially periodic field -- confirmed by direct tiling tests, see
+# memory/rejected-ideas.md): it keeps the original row-alternating, local-edge-only mechanism.
 SYNTHESIS_ATTRACTOR = ImageEncoding("attractor", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_ATTRACTOR, position_guided=False)

@@ -39,6 +39,7 @@ on every push to `main`; it's a stateless demo, not the product.
 | A6. Root `README.md`'s License placeholder | Done — owner chose proprietary/all-rights-reserved, stated explicitly | `CHANGELOG.md` |
 | A8. Migrate `docs/superpowers/` into `memory/` | Done — 6 already-shipped files retired (content already covered, plus 3 new `rejected-ideas.md` entries); 1 draft spec and 3 unexecuted plans deliberately kept; found and fixed 2 more dangling doc-links in `core/sources/markov.py`; added a house rule for future specs/plans | `CHANGELOG.md` |
 | D13. Whole-canvas-aware image generation | Done — gap-row patches now scored against the source texture's true content at that position (for 3 of 4 flavors); measured and confirmed a real visual improvement, not just the alignment bug fix | `CHANGELOG.md` |
+| Follow-up: image disguise's seed/gap row-banding | Done — scattered 2-D anchor placement (Wu & Wang's other departure) replaces the row-alternating layout for the 3 position-guided flavors; overlapping candidate patches (the other half of the technique) were also tried and measurably not worth it | `CHANGELOG.md` |
 | D3. Image texture synthesis visual quality on large-scale-structure textures | Closed, superseded — D13's mechanism addressed the same two flavors this named, via a different approach than either of this item's own untried directions | `CHANGELOG.md` |
 
 ---

@@ -145,6 +145,65 @@ a different ack schema that keeps the derivable content small and enumerable eve
 missing-chunk list (e.g. a fixed-size bitmask instead of an open-ended list, if the maximum chunk
 count is bounded tightly enough).
 
+## Overlapping candidate patches for the scattered image layout (2026-09-09)
+
+*keywords: DEFAULT_CANDIDATE_STRIDE, PatchLibrary stride, overlapping patches, Wu Wang*
+
+**Idea.**
+Wu & Wang's technique draws gap-fill candidates from overlapping, pixel-shifted crops of
+the source texture, not just a small non-overlapping tile grid -- a much finer-grained palette
+that should, in principle, let a gap cell match smoothly-varying content more closely than picking
+from ~256 fixed tiles.
+Implemented as `PatchLibrary`'s `stride` parameter (`stride=1` reproduces
+the paper's "every possible offset" reading) alongside the same day's scattered-anchor layout
+redesign.
+
+**What was tried.**
+Measured directly: build time, encode/decode wall-clock, the "guide fidelity"
+metric (mean squared difference between what was actually placed and the texture's true content at
+that position), and a generalized seam-MSE, at `stride` in `{1, 2, 4, 8}` (`8` = `patch_size`, the
+original non-overlapping palette), fixed non-random input, three flavors.
+
+| Flavor | stride | library size | encode (s) | guide fidelity |
+| --- | --- | --- | --- | --- |
+| `value_noise` | 1 | 16384 | 12.285 | 4513.7 |
+| `value_noise` | 2 | 4096 | 2.205 | 4173.0 |
+| `value_noise` | 4 | 1024 | 0.485 | 3998.5 (best) |
+| `value_noise` | 8 | 256 | 0.139 | 4210.7 |
+| `voronoi` | 1 | 16383 | 11.671 | 3893.9 (best) |
+| `voronoi` | 8 | 256 | 0.171 | 4208.7 |
+| `reaction_diffusion` | 1 | 6846 | 3.280 | 6516.6 |
+| `reaction_diffusion` | 8 | 148 | 0.109 | 4720.6 (best) |
+
+**Why rejected.**
+No consistent winner: `voronoi` did best at `stride=1`, `reaction_diffusion` did
+best at `stride=8` (the original, no-overlap palette), and `value_noise` did best at `stride=4` --
+three different flavors, three different optima, none dramatically better than the others (all
+within a fairly narrow band per flavor).
+Direct visual comparison confirmed the numbers weren't
+hiding a bigger effect either: `value_noise` at `stride=2` and `stride=8` looked comparably good,
+both with the row-banding gone.
+Meanwhile cost scales sharply with a smaller stride -- `stride=1`
+costs roughly 90x `stride=8`'s wall-clock time, clearly impractical for real messages.
+Same root
+cause as the `OVERLAP` entry below: the arithmetic coder picks a *weighted-random* candidate, not
+the best match, so a richer pool doesn't reliably help the way it would a strict minimizer -- a
+bigger, more diverse candidate pool changes the weight distribution's shape in ways that don't
+straightforwardly improve the realized (selected) outcome.
+`DEFAULT_CANDIDATE_STRIDE` shipped as
+`DEFAULT_PATCH_SIZE` (no overlap); the `stride` machinery and its vectorized cost computation
+stayed in `PatchLibrary` regardless -- a generically useful, already-tested capability, not dead
+code, the same reasoning `sources/crypto.py`'s `derive_nonce` helper was kept under.
+The scattered
+anchor placement itself (not the overlapping candidates) is what actually removed the row-banding
+artifact this work started from -- see the 2026-09-09 CHANGELOG.md entry.
+
+**What would reopen it.**
+A non-linear cost-to-weight mapping that preserves a stronger preference
+for low-cost candidates even as the pool grows (untried, and would need its own scrutiny against
+the arithmetic coder's exact-invertibility requirement), or a per-flavor stride choice if a later
+flavor is added where the trade-off clearly favors overlap -- nothing currently does.
+
 ## Widen the image texture blend-cost comparison window (`OVERLAP` > 1) (2026-09-08)
 
 *keywords: OVERLAP, _candidate_weights, seam MSE, Voronoi, reaction-diffusion, blend-cost*

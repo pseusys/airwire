@@ -73,38 +73,48 @@ Three of the four are also periodic (tileable): `value_noise` and `voronoi` were
    made so deliberately, `reaction_diffusion` already was for free (its simulation domain is
    toroidal); `attractor` isn't (see below).
 2. The texture is cut into a library of small square **patches**.
-The output image is built row by
-   row: every *other* row is a **seed row** — real, untouched patches from the source texture,
-   placed at that row's actual position in the (periodic) texture, there purely to anchor the
-   pattern and carrying no secret data.
-3. The rows in between are **gap rows**, filled one patch at a time.
-For each empty spot,
-   `sources/synthesis.py` scores every patch in the library by how close a whole-patch match it is
-   to the *true* content the source texture holds at that exact position — not just by how well its
-   edges blend with its neighbors — plus its left edge against the already-placed patch beside it.
-   Those scores become the arithmetic coder's weights, exactly as word frequencies did for text:
-   good matches are cheap, poor matches expensive, and the ciphertext bits pick which patch
-   actually lands there.
-`attractor` is the one exception: it has no exploitable 2-D positional
-   structure (it's a sparse density histogram of a chaotic orbit, not a spatially periodic field),
-   so it keeps the original edge-only scoring instead.
-4. Growth continues row-pair by row-pair until the ciphertext is exhausted; any leftover space in
-   the final row is padded with the single best-matching patch, which costs no bits at all — purely
-   there to keep the image rectangular.
-5. **Decoding** walks the same grid, recomputes the same scores (true-position match, or edge
-   match for `attractor`) from each gap patch's already-known neighbors, looks up which patch is
-   actually sitting there, and inverts the arithmetic step exactly as the text decoder does.
+Every canvas position is either
+   an **anchor** — real, untouched texture content at that position, carrying no secret data — or
+   a **gap**, filled one patch at a time.
+For `value_noise`/`voronoi`/`reaction_diffusion`, anchors
+   sit at scattered 2-D positions across the whole canvas (a deterministic, seed-derived pattern,
+   not confined to whole rows — this is what keeps the result from reading as alternating
+   "smooth"/"quilted" stripes).
+`attractor` has no exploitable 2-D positional structure (a sparse
+   density histogram of a chaotic orbit, not a spatially periodic field), so it keeps a simpler
+   original design instead: whole alternating anchor rows and gap rows.
+3. For each gap, `sources/synthesis.py` scores every patch in the library by how close a
+   whole-patch match it is to the *true* content the source texture holds at that exact position —
+   not just by how well its edges blend with its neighbors — plus its edges against whichever
+   neighbors are already resolved (the scattered layout walks the canvas in one raster scan, so
+   that's always "above and left"; the row layout only has "above, below, and left" available,
+   since it resolves a whole row at a time).
+Those scores become the arithmetic coder's weights,
+   exactly as word frequencies did for text: good matches are cheap, poor matches expensive, and
+   the ciphertext bits pick which patch actually lands there.
+`attractor` keeps the original,
+   edge-only scoring instead of the true-position score, for the same reason it keeps the row
+   layout.
+4. Growth continues until the ciphertext is exhausted; any leftover space in the row in progress
+   is padded with the single best-matching patch, which costs no bits at all — purely to keep the
+   image rectangular.
+5. **Decoding** walks the same positions in the same order, recomputes the same scores from each
+   gap patch's already-resolved neighbors, looks up which patch is actually sitting there, and
+   inverts the arithmetic step exactly as the text decoder does.
 
 This is a deliberately simplified adaptation of a real, non-neural 2015 steganography technique
 (Wu & Wang's "reversible texture synthesis") — see
 [`memory/wire-protocol.md`](../memory/wire-protocol.md)
 for what was changed and why, and an honest account of where it currently falls short: it
 round-trips exactly for all four texture styles.
-Scoring gap-row patches against the texture's true
+Scoring gap patches against the texture's true
 content at that position (rather than only against immediate neighbors) measurably closes most of
-the gap for textures with large connected shapes (Voronoi cells, reaction-diffusion tubes) — see
-`memory/wire-protocol.md` for the before/after evidence — `attractor`, which has no such positional
-structure to exploit, is unaffected either way.
+the gap for textures with large connected shapes (Voronoi cells, reaction-diffusion tubes), and
+scattering anchors across 2-D positions instead of confining them to whole rows removes the
+"alternating stripes" look that the row layout still has — see `memory/wire-protocol.md` for the
+before/after evidence of both changes.
+`attractor`, which has no positional structure to exploit
+either way, keeps the original row layout and edge-only scoring, unaffected by either change.
 
 Each texture flavor *is* a `ChunkEncoding` (`ImageEncoding` in `sources/synthesis.py`), just one
 whose `encode_atoms` yields exactly one atom — the whole synthesized image, PNG-encoded — instead
@@ -196,10 +206,9 @@ Generated, not committed
 Visual quality
   is still a prototype-stage tradeoff -- see
   [`memory/wire-protocol.md`](../memory/wire-protocol.md)
-  (gap-row patches are scored against the texture's true content at that exact position for three
-  of the four flavors, which measurably closes most of the gap for large-scale structure like
-  `voronoi`/`reaction_diffusion`; `attractor` has no such structure to exploit and keeps the
-  original edge-only scoring).
+  (gap patches are scored against the texture's true content at that exact position, and anchors
+  sit at scattered 2-D positions instead of whole rows, for three of the four flavors; `attractor`
+  has no positional structure to exploit and keeps the original row layout and edge-only scoring).
 
 ## CI
 

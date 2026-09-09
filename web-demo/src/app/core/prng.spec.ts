@@ -1,4 +1,4 @@
-import { chainSeed, Prng } from './prng';
+import { chainSeed, hashBytes, Prng } from './prng';
 
 describe('Prng', () => {
   it('is deterministic for the same seed', () => {
@@ -66,6 +66,24 @@ describe('chainSeed', () => {
 
   it('always returns an unsigned 32-bit integer', () => {
     const result = chainSeed(-1, 'some text with unicode: éè');
+    expect(Number.isInteger(result)).toBeTrue();
+    expect(result).toBeGreaterThanOrEqual(0);
+    expect(result).toBeLessThanOrEqual(0xffffffff);
+  });
+});
+
+describe('hashBytes', () => {
+  it('is deterministic for the same bytes', () => {
+    const bytes = new Uint8Array([1, 2, 3, 4, 5]);
+    expect(hashBytes(bytes)).toBe(hashBytes(new Uint8Array([1, 2, 3, 4, 5])));
+  });
+
+  it('differs when the bytes differ', () => {
+    expect(hashBytes(new Uint8Array([1, 2, 3]))).not.toBe(hashBytes(new Uint8Array([1, 2, 4])));
+  });
+
+  it('always returns an unsigned 32-bit integer', () => {
+    const result = hashBytes(new Uint8Array([255, 0, 128, 64]));
     expect(Number.isInteger(result)).toBeTrue();
     expect(result).toBeGreaterThanOrEqual(0);
     expect(result).toBeLessThanOrEqual(0xffffffff);

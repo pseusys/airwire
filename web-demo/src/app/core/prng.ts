@@ -66,3 +66,17 @@ export function chainSeed(seed: number, text: string): number {
   }
   return hash >>> 0;
 }
+
+/**
+ * FNV-1a over raw bytes, for deriving a deterministic seed from binary content (e.g. a
+ * regenerated texture's own pixel data) rather than text -- shares its algorithm with `chainSeed`,
+ * just without the text-encoding step, since the input is already bytes.
+ */
+export function hashBytes(bytes: Uint8Array): number {
+  let hash = FNV_OFFSET_BASIS >>> 0;
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, FNV_PRIME) >>> 0;
+  }
+  return hash >>> 0;
+}

@@ -121,20 +121,26 @@ Patch-based reversible
 The source texture's seed is derived
   from the hyperslice's own nonce — real per-message variety at zero extra wire cost, safe because
   texture choice needs no confidentiality of its own.
-Every canvas row (seed or gap) maps onto a
-  real row of the source texture via `row % texture_height_in_patches` (`_guide_patch`), which
-  requires the texture to be exactly `canvas_width` patches wide (`DEFAULT_TEXTURE_SIZE =
-  DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE`) and, for canvases taller than one texture, requires
-  the texture to tile seamlessly — true by construction for `reaction_diffusion` (its Laplacian is
-  already toroidal), added deliberately for `value_noise` and `voronoi` (periodic grid/distance
-  wrapping).
-For three of the four flavors (`position_guided=True` on `ImageEncoding`), gap-row
-  candidates are scored against the texture's true content at that exact position, not just
-  against their immediate neighbors — `attractor` has no exploitable 2-D positional structure (a
-  sparse chaotic-orbit density histogram, not a spatially periodic field) and keeps the original
-  edge-only scoring instead.
-See the 2026-09-09 entry in [`../CHANGELOG.md`](../CHANGELOG.md) for
-  the before/after measurements.
+Every canvas position maps onto a real position in the source
+  texture (`_guide_patch`), which requires the texture to be exactly `canvas_width` patches wide
+  (`DEFAULT_TEXTURE_SIZE = DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE`) and, for canvases taller
+  than one texture, requires the texture to tile seamlessly — true by construction for
+  `reaction_diffusion` (its Laplacian is already toroidal), added deliberately for `value_noise`
+  and `voronoi` (periodic grid/distance wrapping).
+Two layout mechanisms exist, chosen per flavor
+  via `position_guided` on `ImageEncoding`: a **scattered anchor layout**
+  (`value_noise`/`voronoi`/`reaction_diffusion`) where a deterministic, seed-derived 2-D anchor
+  mask (`_anchor_mask`, Poisson-disk-style dart-throwing) decides which canvas positions render
+  real texture content versus synthesized content, walked in a plain row-major raster scan with
+  gap cells scored against the texture's true content at that position plus already-resolved
+  above/left neighbors; and the original **row-alternating layout** (`attractor` only, no
+  exploitable 2-D positional structure — a sparse chaotic-orbit density histogram, not a spatially
+  periodic field), scored only against local edge agreement.
+`PatchLibrary` also supports
+  overlapping, pixel-shifted candidates (`stride` parameter) — measured and not adopted as the
+  default, see `memory/rejected-ideas.md`.
+See the two 2026-09-09 entries in
+  [`../CHANGELOG.md`](../CHANGELOG.md) for the before/after measurements of both changes.
 - **`core/sources/handshake.py`** — see [`handshake.md`](handshake.md).
 
 ## Tunables
@@ -150,4 +156,6 @@ See the 2026-09-09 entry in [`../CHANGELOG.md`](../CHANGELOG.md) for
 | `DEFAULT_TEXTURE_SIZE` | 128 | `synthesis.py` | Source texture's edge length in pixels; must equal `DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE`. |
 | `DEFAULT_PATCH_SIZE` | 8 | `synthesis.py` | Edge length, in pixels, of one texture patch. |
 | `DEFAULT_CANVAS_WIDTH` | 16 | `synthesis.py` | Synthesized canvas width, in patches. |
+| `MIN_ANCHOR_DISTANCE` | 1.1 | `synthesis.py` | Minimum toroidal grid distance between scattered anchors; excludes only orthogonally-adjacent cells, the natural maximal blue-noise packing density (~36-39%). |
+| `DEFAULT_CANDIDATE_STRIDE` | `DEFAULT_PATCH_SIZE` (8) | `synthesis.py` | `PatchLibrary` candidate spacing; non-overlapping by default — see `memory/rejected-ideas.md` for why a smaller stride wasn't adopted. |
 | `_FILLER_SEED_SIZE` | 4 | `markov.py` | Byte size of every derived Markov filler/permutation seed. |

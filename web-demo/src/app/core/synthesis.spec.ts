@@ -1,4 +1,4 @@
-import { decode, DEFAULT_CANVAS_WIDTH, DEFAULT_PATCH_SIZE, DEFAULT_TEXTURE_SIZE, encode, Image } from './synthesis';
+import { anchorMask, decode, DEFAULT_CANVAS_WIDTH, DEFAULT_PATCH_SIZE, DEFAULT_TEXTURE_SIZE, encode, Image, isAnchor, maskSeed } from './synthesis';
 import { reactionDiffusion, textureByName, TextureFlavor, valueNoise, voronoi } from './textures';
 
 // Small enough to keep the patch library modest and tests fast, large enough (with patchSize=8)
@@ -44,18 +44,51 @@ describe('image steganography: encode/decode round trip', () => {
     expect(() => decode(canvas, wrongTexture, data.length)).toThrow();
   });
 
-  it('fails closed when a gap-row patch is tampered with', () => {
+  it('fails closed when a gap patch is tampered with', () => {
     const texture = valueNoise(TEXTURE_SIZE, 6);
     const data = crypto.getRandomValues(new Uint8Array(20));
     const canvas = encode(data, texture);
 
-    // Corrupt one pixel in the first gap row (row index 1, i.e. one patch-height down) so the
-    // patch at that position no longer matches ANY entry in the source texture's patch library.
+    // Find a gap cell (not an anchor) to corrupt -- anchor content isn't validated on decode by
+    // design (trusted and used as-is for neighboring gap cells' cost computation), so corrupting
+    // one wouldn't necessarily raise.
+    const period = Math.floor(texture.size / DEFAULT_PATCH_SIZE);
+    const mask = anchorMask(maskSeed(texture), period);
+    const totalRows = canvas.height / DEFAULT_PATCH_SIZE;
+    let row = 0;
+    let col = 0;
+    outer: for (row = 0; row < totalRows; row++) {
+      for (col = 0; col < DEFAULT_CANVAS_WIDTH; col++) {
+        if (!isAnchor(mask, row, col)) break outer;
+      }
+    }
+
     const tampered: Image = { width: canvas.width, height: canvas.height, data: new Uint8Array(canvas.data) };
-    const pixelIndex = (DEFAULT_PATCH_SIZE * canvas.width + 0) * 3;
+    const pixelIndex = (row * DEFAULT_PATCH_SIZE * canvas.width + col * DEFAULT_PATCH_SIZE) * 3;
     tampered.data[pixelIndex] = (tampered.data[pixelIndex] + 128) % 256;
 
     expect(() => decode(tampered, texture, data.length)).toThrow();
+  });
+});
+
+describe('anchorMask', () => {
+  it('is deterministic and periodic', () => {
+    const maskA = anchorMask(7, 16);
+    const maskB = anchorMask(7, 16);
+    expect(maskA).toEqual(maskB);
+    expect(maskA.length).toBe(16);
+    // isAnchor wraps modulo the mask's own period, so a position many periods out still resolves.
+    expect(isAnchor(maskA, 3, 5)).toBe(isAnchor(maskA, 3 + 16 * 4, 5 + 16 * 7));
+  });
+
+  it('has a sane density -- not empty, not clumped', () => {
+    for (let seed = 0; seed < 5; seed++) {
+      const mask = anchorMask(seed, 16);
+      const anchorCount = mask.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
+      const density = anchorCount / (16 * 16);
+      expect(density).toBeGreaterThan(0.25);
+      expect(density).toBeLessThan(0.5);
+    }
   });
 });
 

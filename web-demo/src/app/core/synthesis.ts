@@ -1,21 +1,33 @@
 /**
  * TypeScript port of core/sources/synthesis.py's patch-based reversible texture synthesis -- see
- * that file's docstring for the full explanation of how this works. This ports the encode/decode
- * mechanism itself faithfully (same algorithm, same arithmetic-coder primitives from
- * arithmetic.ts); only the source *texture generation* differs from Python (see textures.ts) --
- * this module doesn't care how a texture was produced, only that both sides derive an identical
- * one, which `textures.ts`'s deterministic seeded generation still guarantees within this page.
+ * that file's docstring for the full explanation of how this works (the scattered-anchor layout,
+ * the row-alternating fallback for `attractor`, and why the overlapping-candidate half of Wu &
+ * Wang's technique isn't the default). This ports the encode/decode mechanism itself faithfully
+ * (same algorithm, same arithmetic-coder primitives from arithmetic.ts); only the source *texture
+ * generation* differs from Python (see textures.ts) -- this module doesn't care how a texture was
+ * produced, only that both sides derive an identical one, which `textures.ts`'s deterministic
+ * seeded generation still guarantees within this page. Likewise, the anchor mask is seeded from
+ * `Prng` (mulberry32) rather than NumPy's PCG64, so the specific anchor arrangement won't match
+ * the real Python encoder's for the same seed -- fine, since nothing here claims cross-platform
+ * bit-exactness (see prng.ts).
  */
 
 import { BitAccumulator, BitCursor, Candidate, candidateRanges, commonLeadingBits, stripTopBits } from './arithmetic';
+import { hashBytes, Prng } from './prng';
 import { Texture } from './textures';
 
 export const DEFAULT_PATCH_SIZE = 8;
 export const DEFAULT_CANVAS_WIDTH = 16;
-// Must equal DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE: the source texture has to be exactly as
-// wide, in patches, as the canvas, or guidePatch's row/col lookup stops corresponding to a real
-// position in the texture (see memory/wire-protocol.md).
 export const DEFAULT_TEXTURE_SIZE = DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE;
+
+// Excludes only orthogonally-adjacent anchors (squared toroidal distance of 1) -- the natural,
+// maximal blue-noise packing density on this small a grid. Mirrors synthesis.py.
+const MIN_ANCHOR_DISTANCE = 1.1;
+
+// Measured against smaller strides and not adopted -- see synthesis.py's docstring and
+// memory/rejected-ideas.md for the full evidence. Non-overlapping (== DEFAULT_PATCH_SIZE) by
+// default; PatchLibrary still supports a smaller stride if ever needed.
+export const DEFAULT_CANDIDATE_STRIDE = DEFAULT_PATCH_SIZE;
 
 export interface Image {
   readonly width: number;
@@ -33,26 +45,51 @@ function subImage(image: Image, r0: number, c0: number, size: number): Image {
   return { width: size, height: size, data };
 }
 
+/** Crop a patchSize-square window starting at pixel offset (row0, col0), wrapping each axis
+ * independently modulo the image's own size. An overlapping candidate can start at any pixel
+ * offset, including ones where the window would otherwise run off the edge -- unlike `subImage`,
+ * which is only safe for always-in-bounds crops (e.g. a rendered canvas). Mirrors
+ * `_periodic_extract` in synthesis.py. */
+function periodicExtract(image: Image, row0: number, col0: number, patchSize: number): Image {
+  const data = new Uint8Array(patchSize * patchSize * 3);
+  for (let y = 0; y < patchSize; y++) {
+    const srcRow = (row0 + y) % image.height;
+    for (let x = 0; x < patchSize; x++) {
+      const srcCol = (col0 + x) % image.width;
+      const srcBase = (srcRow * image.width + srcCol) * 3;
+      const dstBase = (y * patchSize + x) * 3;
+      data[dstBase] = image.data[srcBase];
+      data[dstBase + 1] = image.data[srcBase + 1];
+      data[dstBase + 2] = image.data[srcBase + 2];
+    }
+  }
+  return { width: patchSize, height: patchSize, data };
+}
+
 function patchKey(patch: Image): string {
   return patch.data.join(',');
 }
 
-/** The fixed palette of candidate patches a source texture is divided into. */
+/** The candidate palette a source texture is divided into. `stride` (default `patchSize`)
+ * reproduces the original non-overlapping tile grid; a smaller stride yields overlapping,
+ * pixel-shifted candidates -- see `DEFAULT_CANDIDATE_STRIDE`'s docstring for why that isn't the
+ * default. Mirrors `PatchLibrary` in synthesis.py. */
 export class PatchLibrary {
   readonly patchSize: number;
   readonly patches: Image[] = [];
   private readonly lookup = new Map<string, number>();
 
-  constructor(texture: Texture, patchSize: number) {
+  constructor(texture: Texture, patchSize: number, stride?: number) {
     const size = texture.size;
     if (size % patchSize !== 0) {
       throw new Error(`Texture size must be a multiple of patchSize (${patchSize})!`);
     }
     this.patchSize = patchSize;
     const image: Image = { width: size, height: size, data: texture.data };
-    for (let row = 0; row < size; row += patchSize) {
-      for (let col = 0; col < size; col += patchSize) {
-        const patch = subImage(image, row, col, patchSize);
+    const step = stride ?? patchSize;
+    for (let row = 0; row < size; row += step) {
+      for (let col = 0; col < size; col += step) {
+        const patch = periodicExtract(image, row, col, patchSize);
         const key = patchKey(patch);
         if (this.lookup.has(key)) continue; // flat/repeated regions (e.g. Voronoi cell interiors) can duplicate; skip.
         this.lookup.set(key, this.patches.length);
@@ -77,16 +114,70 @@ export class PatchLibrary {
   }
 }
 
-/** The literal patch this (periodic) texture holds at canvas position (row, col) -- used to render
- * every seed row exactly (real content, no bits consumed) and, for the three position-guided
- * flavors, as the ground truth gap-row candidates are scored against. Wraps modulo the texture's
- * own patch grid, so it's well-defined for a canvas of any height, even past one full texture
- * period (see memory/wire-protocol.md). Mirrors `_guide_patch` in synthesis.py. */
+/** The literal patch this (periodic) texture holds at canvas position (row, col) -- used to
+ * render every anchor cell exactly (real content, no bits consumed) and, for the scattered
+ * layout's gap cells, as the ground truth candidates are scored against. Wraps modulo the
+ * texture's own patch grid, so it's well-defined for a canvas of any height, even past one full
+ * texture period. Mirrors `_guide_patch` in synthesis.py. */
 function guidePatch(texture: Texture, row: number, col: number, patchSize: number): Image {
   const rowsPerPeriod = Math.floor(texture.size / patchSize);
   const colsPerPeriod = Math.floor(texture.size / patchSize);
   const image: Image = { width: texture.size, height: texture.size, data: texture.data };
-  return subImage(image, (row % rowsPerPeriod) * patchSize, (col % colsPerPeriod) * patchSize, patchSize);
+  return periodicExtract(image, (row % rowsPerPeriod) * patchSize, (col % colsPerPeriod) * patchSize, patchSize);
+}
+
+/** A deterministic seed for the anchor mask, derived from the texture's own content -- so encode
+ * and decode agree without needing the original integer seed threaded through (only the
+ * regenerated texture is available at this layer). Exported for tests that need to find a real
+ * gap cell to tamper with. Mirrors `_mask_seed` in synthesis.py. */
+export function maskSeed(texture: Texture): number {
+  return hashBytes(texture.data);
+}
+
+/** A (period, period) boolean grid of which patch-grid positions are anchors, via deterministic
+ * Poisson-disk-style dart-throwing: shuffle every cell with a seeded RNG, accept a cell if it's
+ * at least MIN_ANCHOR_DISTANCE from every already-accepted anchor, until no more qualify. Distance
+ * is toroidal (wrapped), matching how the mask itself gets tiled modulo its own period for
+ * canvases taller than one period. Exported for tests that need to find a real gap cell to
+ * tamper with. Mirrors `_anchor_mask` in synthesis.py (using `Prng`, not NumPy's PCG64 -- see the
+ * module docstring). */
+export function anchorMask(seed: number, period: number): boolean[][] {
+  const rng = new Prng(seed);
+  const positions: [number, number][] = [];
+  for (let row = 0; row < period; row++) {
+    for (let col = 0; col < period; col++) positions.push([row, col]);
+  }
+  for (let i = positions.length - 1; i > 0; i--) {
+    const j = rng.nextInt(0, i + 1);
+    [positions[i], positions[j]] = [positions[j], positions[i]];
+  }
+
+  const accepted: [number, number][] = [];
+  const mask: boolean[][] = Array.from({ length: period }, () => new Array(period).fill(false));
+  const minDistanceSq = MIN_ANCHOR_DISTANCE * MIN_ANCHOR_DISTANCE;
+
+  for (const [row, col] of positions) {
+    let farEnough = true;
+    for (const [acceptedRow, acceptedCol] of accepted) {
+      const rowGap = Math.min(Math.abs(row - acceptedRow), period - Math.abs(row - acceptedRow));
+      const colGap = Math.min(Math.abs(col - acceptedCol), period - Math.abs(col - acceptedCol));
+      if (rowGap * rowGap + colGap * colGap < minDistanceSq) {
+        farEnough = false;
+        break;
+      }
+    }
+    if (farEnough) {
+      accepted.push([row, col]);
+      mask[row][col] = true;
+    }
+  }
+
+  return mask;
+}
+
+export function isAnchor(mask: boolean[][], row: number, col: number): boolean {
+  const period = mask.length;
+  return mask[((row % period) + period) % period][((col % period) + period) % period];
 }
 
 function topRow(patch: Image): Uint8Array {
@@ -125,46 +216,44 @@ function edgeCost(a: ArrayLike<number>, b: ArrayLike<number>): number {
   return sum;
 }
 
-/** Weight every library patch by how well it would fill gap-row position (row, col), plus its
- * left edge against the already-chosen gap patch to its left, if any (comparing a wider overlap
- * region instead of just the touching row of pixels was tried and measurably made this worse, not
- * better -- see memory/rejected-ideas.md's OVERLAP entry).
- *
- * Position-guided flavors (`positionGuided=true`) score the *whole patch* against the true content
- * this periodic texture holds at exactly this position -- always known, since it's a pure function
- * of position and the shared seed, not of anything already placed -- which is what lets large-scale
- * structure (a Voronoi cell, a reaction-diffusion tube) survive: every gap patch is pulled toward
- * the real image that would be there anyway, not just towards agreeing with its immediate
- * neighbors. The one flavor without exploitable positional structure (`attractor`) keeps the
- * original, purely local edge-vs-neighboring-seed-rows cost instead. Mirrors `_candidate_weights`
- * in synthesis.py. */
-function candidateWeights(library: PatchLibrary, gapRow: Image[], texture: Texture, row: number, col: number, positionGuided: boolean): Candidate<number>[] {
-  const left = col > 0 ? gapRow[col - 1] : null;
-  const patchSize = library.patchSize;
-
-  const costs: number[] = [];
-  if (positionGuided) {
-    const target = guidePatch(texture, row, col, patchSize);
-    for (const patch of library.patches) {
-      let cost = edgeCost(patch.data, target.data);
-      if (left !== null) {
-        cost += edgeCost(leftColumn(patch), rightColumn(left));
-      }
-      costs.push(cost);
-    }
-  } else {
-    const above = guidePatch(texture, row - 1, col, patchSize);
-    const below = guidePatch(texture, row + 1, col, patchSize);
-    for (const patch of library.patches) {
-      let cost = edgeCost(topRow(patch), bottomRow(above)) + edgeCost(bottomRow(patch), topRow(below));
-      if (left !== null) {
-        cost += edgeCost(leftColumn(patch), rightColumn(left));
-      }
-      costs.push(cost);
-    }
-  }
+function weightsFromCosts(costs: number[]): Candidate<number>[] {
   const maxCost = Math.max(...costs);
   return costs.map((cost, index) => [index, BigInt(maxCost - cost + 1)] as Candidate<number>);
+}
+
+/** Weight every library patch by how close a whole-patch match it is to the texture's true
+ * content at this exact position, plus its top/left edges against the already-resolved neighbors
+ * above and to the left, when they exist (never below or right -- those aren't resolved yet in
+ * this raster-order walk). Mirrors `_candidate_weights_scattered` in synthesis.py. */
+function candidateWeightsScattered(library: PatchLibrary, texture: Texture, row: number, col: number, above: Image | null, left: Image | null): Candidate<number>[] {
+  const target = guidePatch(texture, row, col, library.patchSize);
+  const costs: number[] = [];
+  for (const patch of library.patches) {
+    let cost = edgeCost(patch.data, target.data);
+    if (left !== null) cost += edgeCost(leftColumn(patch), rightColumn(left));
+    if (above !== null) cost += edgeCost(topRow(patch), bottomRow(above));
+    costs.push(cost);
+  }
+  return weightsFromCosts(costs);
+}
+
+/** `attractor`'s unchanged mechanism: rank every library patch purely by local edge agreement
+ * with the seed rows immediately above and below, plus the already-chosen gap patch to its left,
+ * if any. Mirrors `_candidate_weights_rows` in synthesis.py. */
+function candidateWeightsRows(library: PatchLibrary, gapRow: Image[], texture: Texture, row: number, col: number): Candidate<number>[] {
+  const above = guidePatch(texture, row - 1, col, library.patchSize);
+  const below = guidePatch(texture, row + 1, col, library.patchSize);
+  const left = col > 0 ? gapRow[col - 1] : null;
+
+  const costs: number[] = [];
+  for (const patch of library.patches) {
+    let cost = edgeCost(topRow(patch), bottomRow(above)) + edgeCost(bottomRow(patch), topRow(below));
+    if (left !== null) {
+      cost += edgeCost(leftColumn(patch), rightColumn(left));
+    }
+    costs.push(cost);
+  }
+  return weightsFromCosts(costs);
 }
 
 function blit(dst: Uint8Array, dstWidth: number, patch: Image, r0: number, c0: number): void {
@@ -192,16 +281,125 @@ function extractPatchAt(canvas: Image, patchRow: number, patchCol: number, patch
   return subImage(canvas, patchRow * patchSize, patchCol * patchSize, patchSize);
 }
 
-/** Synthesize `data` into an image: a seed row, then alternating gap/seed row pairs until `data`
+function encodeScattered(data: Uint8Array, texture: Texture, patchSize: number, canvasWidth: number): Image {
+  const library = new PatchLibrary(texture, patchSize, DEFAULT_CANDIDATE_STRIDE);
+  const period = Math.floor(texture.size / patchSize);
+  const mask = anchorMask(maskSeed(texture), period);
+  const cursor = new BitCursor(data);
+  const rows: Image[][] = [];
+  let low = 0n;
+  let high = 1n;
+  let width = 1;
+  let rowIndex = 0;
+
+  for (;;) {
+    const rowPatches: Image[] = [];
+    for (let col = 0; col < canvasWidth; col++) {
+      if (isAnchor(mask, rowIndex, col)) {
+        rowPatches.push(guidePatch(texture, rowIndex, col, patchSize));
+        continue;
+      }
+
+      const above = rowIndex > 0 ? rows[rowIndex - 1][col] : null;
+      const left = col > 0 ? rowPatches[col - 1] : null;
+      const candidates = candidateWeightsScattered(library, texture, rowIndex, col, above, left);
+
+      if (cursor.remaining() <= 0) {
+        let [bestIndex, bestWeight] = candidates[0];
+        for (const [index, weight] of candidates) {
+          if (weight > bestWeight) {
+            bestWeight = weight;
+            bestIndex = index;
+          }
+        }
+        rowPatches.push(library.patches[bestIndex]);
+        continue;
+      }
+
+      const budget = cursor.remaining();
+      const [ranges, newLow, newHigh, newWidth] = candidateRanges(low, high, width, candidates, budget);
+      low = newLow;
+      high = newHigh;
+      width = newWidth;
+      const peeked = cursor.peek(width);
+      const match = ranges.find(([, lo, hi]) => lo <= peeked && peeked <= hi);
+      if (!match) {
+        throw new Error('No candidate range matched the peeked bits -- this should never happen.');
+      }
+      const [index, lo, hi] = match;
+      rowPatches.push(library.patches[index]);
+      low = lo;
+      high = hi;
+
+      const common = commonLeadingBits(low, high, width);
+      if (common) {
+        cursor.consume(Math.min(common, cursor.remaining()));
+        [low, high, width] = stripTopBits(low, high, width, common);
+      }
+    }
+
+    rows.push(rowPatches);
+    rowIndex++;
+    if (cursor.remaining() <= 0) break;
+  }
+
+  return rowsToCanvas(rows);
+}
+
+function decodeScattered(canvas: Image, texture: Texture, length: number, patchSize: number): Uint8Array {
+  const library = new PatchLibrary(texture, patchSize, DEFAULT_CANDIDATE_STRIDE);
+  const canvasWidth = Math.floor(canvas.width / patchSize);
+  const totalRows = Math.floor(canvas.height / patchSize);
+  const period = Math.floor(texture.size / patchSize);
+  const mask = anchorMask(maskSeed(texture), period);
+
+  const accumulator = new BitAccumulator(length);
+  let low = 0n;
+  let high = 1n;
+  let width = 1;
+  const rows: Image[][] = [];
+
+  for (let rowIndex = 0; rowIndex < totalRows; rowIndex++) {
+    const rowPatches: Image[] = [];
+    for (let col = 0; col < canvasWidth; col++) {
+      const patch = extractPatchAt(canvas, rowIndex, col, patchSize);
+      rowPatches.push(patch);
+
+      if (isAnchor(mask, rowIndex, col) || accumulator.done()) continue;
+
+      const above = rowIndex > 0 ? rows[rowIndex - 1][col] : null;
+      const left = col > 0 ? rowPatches[col - 1] : null;
+      const candidates = candidateWeightsScattered(library, texture, rowIndex, col, above, left);
+      const [ranges, newLow, newHigh, newWidth] = candidateRanges(low, high, width, candidates, accumulator.remaining());
+      low = newLow;
+      high = newHigh;
+      width = newWidth;
+      const actualIndex = library.indexOf(patch);
+      const match = ranges.find(([index]) => index === actualIndex);
+      if (!match) {
+        throw new Error(`Patch at (row=${rowIndex}, col=${col}) is not a valid candidate at this point in the synthesis walk!`);
+      }
+      const [, lo, hi] = match;
+      low = lo;
+      high = hi;
+
+      const common = commonLeadingBits(low, high, width);
+      if (common) {
+        accumulator.append(low, width, common);
+        [low, high, width] = stripTopBits(low, high, width, common);
+      }
+    }
+    rows.push(rowPatches);
+    if (accumulator.done()) break;
+  }
+
+  return accumulator.finish();
+}
+
+/** `attractor`'s unchanged mechanism: a seed row, then alternating gap/seed row pairs until `data`
  * is fully consumed, padded with best-match filler (no bits consumed) if it runs out mid-row, so
- * the result is always rectangular. Mirrors `encode` in synthesis.py. */
-export function encode(
-  data: Uint8Array,
-  texture: Texture,
-  patchSize = DEFAULT_PATCH_SIZE,
-  canvasWidth = DEFAULT_CANVAS_WIDTH,
-  positionGuided = true,
-): Image {
+ * the result is always rectangular. Mirrors `_encode_rows` in synthesis.py. */
+function encodeRows(data: Uint8Array, texture: Texture, patchSize: number, canvasWidth: number): Image {
   const library = new PatchLibrary(texture, patchSize);
   const cursor = new BitCursor(data);
   const rows: Image[][] = [Array.from({ length: canvasWidth }, (_, col) => guidePatch(texture, 0, col, patchSize))];
@@ -213,7 +411,7 @@ export function encode(
   while (cursor.remaining() > 0) {
     const gapRow: Image[] = [];
     for (let col = 0; col < canvasWidth; col++) {
-      const candidates = candidateWeights(library, gapRow, texture, rowIndex, col, positionGuided);
+      const candidates = candidateWeightsRows(library, gapRow, texture, rowIndex, col);
       if (cursor.remaining() <= 0) {
         let [bestIndex, bestWeight] = candidates[0];
         for (const [index, weight] of candidates) {
@@ -256,9 +454,8 @@ export function encode(
   return rowsToCanvas(rows);
 }
 
-/** Invert `encode`: recover exactly `length` bytes from a synthesized canvas. Mirrors `decode` in
- * synthesis.py. */
-export function decode(canvas: Image, texture: Texture, length: number, patchSize = DEFAULT_PATCH_SIZE, positionGuided = true): Uint8Array {
+/** Invert `encodeRows`. Mirrors `_decode_rows` in synthesis.py. */
+function decodeRows(canvas: Image, texture: Texture, length: number, patchSize: number): Uint8Array {
   const library = new PatchLibrary(texture, patchSize);
   const canvasWidth = Math.floor(canvas.width / patchSize);
   const totalRows = Math.floor(canvas.height / patchSize);
@@ -278,7 +475,7 @@ export function decode(canvas: Image, texture: Texture, length: number, patchSiz
         continue;
       }
 
-      const candidates = candidateWeights(library, gapRow, texture, rowIndex, col, positionGuided);
+      const candidates = candidateWeightsRows(library, gapRow, texture, rowIndex, col);
       const [ranges, newLow, newHigh, newWidth] = candidateRanges(low, high, width, candidates, accumulator.remaining());
       low = newLow;
       high = newHigh;
@@ -303,4 +500,25 @@ export function decode(canvas: Image, texture: Texture, length: number, patchSiz
   }
 
   return accumulator.finish();
+}
+
+/** Synthesize `data` into an image: the scattered-anchor layout (`positionGuided=true`, the
+ * default) or the row-alternating layout (`positionGuided=false`, `attractor` only). Mirrors
+ * `encode` in synthesis.py. */
+export function encode(
+  data: Uint8Array,
+  texture: Texture,
+  patchSize = DEFAULT_PATCH_SIZE,
+  canvasWidth = DEFAULT_CANVAS_WIDTH,
+  positionGuided = true,
+): Image {
+  if (positionGuided) return encodeScattered(data, texture, patchSize, canvasWidth);
+  return encodeRows(data, texture, patchSize, canvasWidth);
+}
+
+/** Invert `encode`: recover exactly `length` bytes from a synthesized canvas. Mirrors `decode` in
+ * synthesis.py. */
+export function decode(canvas: Image, texture: Texture, length: number, patchSize = DEFAULT_PATCH_SIZE, positionGuided = true): Uint8Array {
+  if (positionGuided) return decodeScattered(canvas, texture, length, patchSize);
+  return decodeRows(canvas, texture, length, patchSize);
 }
