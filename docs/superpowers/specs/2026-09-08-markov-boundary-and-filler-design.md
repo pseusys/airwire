@@ -2,7 +2,7 @@
 
 > **Status:** approved design, ready for implementation planning.
 > **Relationship to other docs:** refines the Markov-chain text disguise encoding from
-> [design decision #3](../../design-decisions.md#3-the-markov-chain-text-disguise-encoding)
+> [`memory/wire-protocol.md`](../../../memory/wire-protocol.md)
 > ([`core/sources/markov.py`](../../../core/sources/markov.py)). Resolves that decision's own
 > "Known limitations" note about `___END__` being rendered verbatim, and closes a related gap
 > (the final sentence of a hyperslice's text is always cut off mid-walk) that wasn't previously

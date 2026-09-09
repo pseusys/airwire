@@ -1,0 +1,70 @@
+name: Lint
+
+# Least privilege by default. Add a scope only when a step actually needs it.
+permissions:
+  contents: read
+
+# No branch filter: this runs on every branch, so a problem is found on the
+# commit that caused it rather than at merge time. Scope by `paths` instead,
+# so the workflow only runs on changes it could actually fail on.
+on:
+  push:
+    paths:
+      - 'memory/**'
+      - '**.md'
+      - '.markdownlint.jsonc'
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+      - '.github/scripts/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint-memory:
+    name: Lint the Knowledge Base
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v4
+
+      # Also runs shellcheck over every `run:` block, which is why a `run:`
+      # longer than a command belongs in .github/scripts/ instead.
+      - name: Lint workflows 🧪
+        uses: raven-actions/actionlint@v2
+
+      # Excludes web-demo/node_modules (vendored) and docs/superpowers/ + docs/research-proposal.md
+      # (a frozen historical archive and a separate research track, predating this layout's house
+      # style -- see .markdownlintignore).
+      - name: Lint markdown 📝
+        uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: |
+            **/*.md
+            !web-demo/node_modules
+            !web-demo/dist
+            !web-demo/.angular
+            !core/.venv
+            !core/.cache
+            !docs/superpowers
+            !docs/research-proposal.md
+
+      - name: Setup Python 🐍
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Lint automation scripts 📜
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: 'check --config memory/scripts/ruff.toml memory/scripts'
+
+      # Links resolve, both indexes match the files on disk, and the markdown
+      # house rules hold. Not --strict yet: see TODO.md's one-sentence-per-line
+      # reflow item -- turning that flag on today would fail on ~300 pre-existing
+      # and new-but-not-yet-reflowed style warnings, not a real regression.
+      - name: Verify the knowledge base 🧠
+        shell: bash
+        run: python memory/scripts/verify_memory.py

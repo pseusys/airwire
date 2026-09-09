@@ -151,7 +151,7 @@ starting "The sentence-boundary token is rendered verbatim...") with:
   see `sources/corpus.py`), so `\n` is unambiguous as a boundary marker in a way a period isn't --
   a period *is* a real character inside real vocabulary words (`Mr.`, `Dr.`), which is exactly why
   reinserting boundaries by scanning for periods was tried and rejected; see
-  [the design doc](../../docs/superpowers/specs/2026-09-08-markov-boundary-and-filler-design.md)
+  [the design doc](../specs/2026-09-08-markov-boundary-and-filler-design.md)
   for the full evidence. Bonus: a multi-line disguised message is unremarkable, unlike a literal
   `___END__` string ever was.
 ```

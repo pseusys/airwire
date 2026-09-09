@@ -1,7 +1,7 @@
 # airwire core (Phase 0 proof of concept)
 
 Platform-independent Python implementation of airwire's crypto, message framing, and SMS
-chunking, per the [product README](../README.md) and [roadmap](../docs/roadmap.md#phase-0--core-engine-poc-python-no-app).
+chunking, per the [product README](../README.md) and [`TODO.md`](../TODO.md).
 
 No mobile code lives here. The point of this package is to prove the protocol design — and, once
 it's frozen, to serve as the source of test vectors the future Android/iOS clients get checked
@@ -48,7 +48,7 @@ and "how much each one should cost."
    from, and accumulates the same bits back out — the same arithmetic, run in the same order, so it
    always lands on the exact original ciphertext.
 
-See [design decision #3](../docs/design-decisions.md#3-the-markov-chain-text-disguise-encoding)
+See [`memory/wire-protocol.md`](../memory/wire-protocol.md)
 for why this was hand-rolled rather than built on an existing entropy-coding library, and its
 current limitations (the sentence-boundary marker is a literal `___END__` tag rather than
 punctuation; only the English model auto-detects on receive, Russian must be requested explicitly
@@ -81,7 +81,7 @@ on both ends).
 
 This is a deliberately simplified adaptation of a real, non-neural 2015 steganography technique
 (Wu & Wang's "reversible texture synthesis") — see
-[design decision #4](../docs/design-decisions.md#4-image-steganography-patch-based-texture-synthesis-prototype)
+[`memory/wire-protocol.md`](../memory/wire-protocol.md)
 for what was changed and why, and an honest account of where it currently falls short: it
 round-trips exactly for all four texture styles, but visual quality still varies a lot — smooth
 noise-like textures hold up well, while textures with large connected shapes (Voronoi cells,
@@ -106,7 +106,7 @@ parameter fixes that: it pads the header to a fixed size (so its disguised lengt
 be self-describing) and runs it through the same disguise machinery as the payload.
 
 Neither `encoding` nor `header_encoding` are meant to be picked per message, though — see
-[`docs/handshake.md`](../docs/handshake.md) for the full design, but in short: each sender's
+[`memory/handshake.md`](../memory/handshake.md) for the full design, but in short: each sender's
 messages (handshake certificate included) are disguised the same way for the entire conversation,
 derived from nothing but that sender's own public transport identifier (a phone number, a platform
 user ID), needing no exchange or pre-shared secret at all. `sources/handshake.py` is the
@@ -140,7 +140,7 @@ exchange plus an X25519-derived session key) and the obfuscation-mode derivation
   certificate exchange of fresh per-conversation X25519 keys, an ECDH-derived session key, and the
   derivation (from nothing but each sender's own public transport identifier) of which disguise
   that sender's messages use for the entire conversation. See
-  [`docs/handshake.md`](../docs/handshake.md) for the full design and its security properties.
+  [`memory/handshake.md`](../memory/handshake.md) for the full design and its security properties.
 - `sources/corpus.py` — downloads and locally caches the plain-text sentence corpora (English and
   Russian, from [Tatoeba](https://tatoeba.org/en/downloads)) used to train the Markov-chain text
   disguise model. Downloads once per language, on first use; later calls reuse the cached file.
@@ -152,7 +152,7 @@ exchange plus an X25519-derived session key) and the obfuscation-mode derivation
   the frozen chain above, using a from-scratch, pure-integer arithmetic coder (not a
   general-purpose entropy-coding library -- see the module's docstring for why `constriction` was
   tried and rejected, and
-  [design decision #3](../docs/design-decisions.md#3-the-markov-chain-text-disguise-encoding) for
+  [`memory/wire-protocol.md`](../memory/wire-protocol.md) for
   the full story) so encode/decode agree byte-for-byte on any device, with no floating point or ML
   inference anywhere in that path. `MARKOV_ENG` and `MARKOV_RUS` each have their own
   `ChunkEncoding` identifier, so `unpack_hyperchunk` auto-detects either correctly from the header.
@@ -170,7 +170,7 @@ exchange plus an X25519-derived session key) and the obfuscation-mode derivation
   as a `ChunkEncoding` (one PNG-encoded image per hyperchunk, source-texture seed derived from the
   hyperslice's own AEAD nonce) -- four registered instances, one per texture flavor. Visual quality
   is still a prototype-stage tradeoff -- see
-  [design decision #4](../docs/design-decisions.md#4-image-steganography-patch-based-texture-synthesis-prototype)
+  [`memory/wire-protocol.md`](../memory/wire-protocol.md)
   (locally-stationary textures like `value_noise` hold up well; textures with large-scale
   structure like `voronoi`/`reaction_diffusion` degrade, less so than an earlier naive version but
   still noticeably).
@@ -197,7 +197,7 @@ poetry install --all-extras
 poetry poe generate           # regenerate sources/proto/*_pb2.py from the .proto schema
 poetry poe train-stego-model  # download/cache corpora, (re)train sources/data/markov_*.json
 poetry poe demo                 # encrypt + wire-encode a demo message end-to-end, print each step
-poetry poe demo-handshake       # run docs/handshake.md's session establishment end to end
+poetry poe demo-handshake       # run memory/handshake.md's session establishment end to end
 poetry poe test                 # run the unit test suite
 poetry poe lint                 # flake8 + black --check + mypy
 poetry poe format               # black (modifies files)
@@ -216,4 +216,4 @@ takes the same choices and additionally disguises the header message the same wa
 `demo-handshake` runs `sources/handshake.py`'s certificate exchange and session-key derivation
 between two sender identifiers (`--alice-id`/`--bob-id`, default fake phone numbers), then sends
 one real hyperchunk through the derived session key and each side's independently-derived
-obfuscation mode -- see [`docs/handshake.md`](../docs/handshake.md) for the design this implements.
+obfuscation mode -- see [`memory/handshake.md`](../memory/handshake.md) for the design this implements.

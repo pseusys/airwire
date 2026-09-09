@@ -4,7 +4,7 @@ A small, standalone web page that showcases *only* the disguise mechanism behind
 steganography — message bytes in, plausible-looking sentences out, and back — with none of the
 surrounding protocol. See [`core/README.md`](../core/README.md#how-the-steganography-works) for
 the full explanation of the underlying trick (an arithmetic coder run backwards) and
-[`docs/design-decisions.md`](../docs/design-decisions.md) for why the real protocol looks the way
+[`memory/wire-protocol.md`](../memory/wire-protocol.md) for why the real protocol looks the way
 it does.
 
 ## What this deliberately is not
@@ -18,7 +18,7 @@ of the actual protocol:
 - **No chunking.** One message becomes one disguised blob, not a `pack_hyperchunk`-style header +
   sequenced wire chunks (see [`core/sources/chunking.py`](../core/sources/chunking.py)).
 - **No handshake.** There's no session, no key exchange, no per-sender obfuscation-mode derivation
-  (see [`docs/handshake.md`](../docs/handshake.md)).
+  (see [`memory/handshake.md`](../memory/handshake.md)).
 
 Just the encode/decode mechanism, in isolation, so it's easy to see and experiment with.
 

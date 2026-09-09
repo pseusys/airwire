@@ -34,6 +34,7 @@ web-demo/out-tsc/
 **/.settings/
 **/*.sublime-workspace
 **/.history/*
+**/.superpowers
 
 **/.vscode/
 

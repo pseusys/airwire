@@ -2,8 +2,8 @@
 
 > **Status:** approved design, ready for implementation planning.
 > **Relationship to other docs:** implements the required section of
-> [medium-interface.md](../../medium-interface.md) for Odnoklassniki, informed by the OAuth findings
-> in [medium-candidates.md](../../medium-candidates.md). Deliberately **does not** depend on the
+> [`memory/medium.md`](../../../memory/medium.md) for Odnoklassniki, informed by the OAuth findings
+> in the same file. Deliberately **does not** depend on the
 > protocol spec's crypto layer ([messaging-protocol-design.md](2026-08-27-messaging-protocol-design.md))
 > or on the three approved-but-unexecuted `protocol/` Dart plans
 > (`2026-08-30-protocol-core-dart.md`, `2026-08-30-handshake-dart.md`, `2026-08-31-key-rotation-dart.md`)

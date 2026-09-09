@@ -1,0 +1,54 @@
+# Ruff configuration for the automation scripts in this directory.
+#
+#     ruff check --config memory/scripts/ruff.toml memory/scripts/
+#     ruff format --config memory/scripts/ruff.toml memory/scripts/
+#
+# This file governs `memory/scripts/` only, because ruff reads the nearest
+# config above each file. It is here as the worked example: the Python rules in
+# memory/coding-guidelines.md, enforced on real code that ships with the layout.
+#
+# For the project's own Python, copy this to the package root rather than
+# pointing at it from a distance. Two configs that must agree will not.
+#
+# Docs: https://docs.astral.sh/ruff/configuration/
+
+# Long lines are preferred over broken ones — see memory/coding-guidelines.md.
+# This is a backstop against runaway lines, not a wrapping target.
+line-length = 320
+
+[lint]
+preview = true
+
+select = [
+    "E", "F",     # pycodestyle, pyflakes — the baseline
+    "I",          # isort — imports sorted, and at the top of the file
+    "UP",         # pyupgrade — no syntax kept alive for versions we do not support
+    "B",          # bugbear — the bug-shaped subset of style
+    "ANN",        # flake8-annotations — type hints wherever possible
+    "PLC0415",    # no imports inside functions
+    "PLR2004",    # magic-value-comparison — use named constants
+    "PERF",       # perflint — avoidable inefficiency
+    "SIM",        # flake8-simplify
+    "ICN001",     # idiomatic import aliases, where a convention exists
+]
+
+ignore = [
+    "ANN401",                       # `Any` is allowed where a library gives you nothing better
+    "RUF001", "RUF002", "RUF003",   # ambiguous unicode: the em dashes in docstrings are deliberate
+]
+
+# Per-file exceptions. Keep each one commented with the reason it exists — an
+# uncommented ignore is indistinguishable from a mistake six months later.
+[lint.per-file-ignores]
+# "path/to/entrypoint.py" = ["ANN001"]   # script entrypoint, argv is untyped
+# "path/to/generators/*.py" = ["PLR2004"]   # inline numeric constants are the subject matter
+
+# Import aliases this project considers canonical. Ruff ships sensible defaults
+# (numpy as np, pandas as pd); add only what is specific here.
+[lint.flake8-import-conventions.aliases]
+# numpy = "np"
+# "matplotlib.pyplot" = "plt"
+
+# Uncomment if this project uses deliberate column alignment in assignments,
+# which the whitespace rules would otherwise fight:
+# extend-ignore = ["E221", "E222", "E231", "E241", "E251", "E272"]

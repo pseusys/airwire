@@ -5,7 +5,7 @@
 **Goal:** Implement the messaging protocol spec's §6 (key rotation) on top of the
 [handshake plan](2026-08-30-handshake-dart.md) — per-direction directional-key rotation triggered
 by message count, with the header/data key split worked out precisely in
-[`docs/crypto-summary.md`](../../crypto-summary.md) §4.
+[`memory/handshake.md`](../../../memory/handshake.md)'s "Target spec" section.
 
 **Architecture:** A small, targeted extension to `envelope.dart` (the wire-format change: a header
 can optionally carry 32 bytes of rotation material, and which key encrypts the data portion can

@@ -1,0 +1,54 @@
+// Markdown house rules for this repository.
+//
+// Read by editors and by `markdownlint-cli2` where Node is available:
+//
+//     npx markdownlint-cli2 "**/*.md"
+//
+// `memory/scripts/verify_memory.py` enforces the subset that matters with no
+// dependencies at all, plus the checks a config cannot express: link
+// resolution, index/file agreement, and one-sentence-per-line. Prefer the
+// script as the gate; this file is for the squiggles while you type.
+{
+  // Every rule on, including ones added by future markdownlint releases. That
+  // is deliberate: a new rule surfaces as work rather than staying invisible.
+  // It also means an upgrade can fail a build that passed yesterday, so pin
+  // the styles that matter (below) rather than relying on "consistent".
+  "default": true,
+
+  // Tables: pipes padded with single spaces, delimiter rows written `| --- |`.
+  "MD060": { "style": "compact" },
+
+  // Sentences are the unit of a line here, so lines are as long as sentences.
+  // See "Documentation" in memory/dos-and-donts.md for why.
+  "MD013": false,
+
+  // Placeholders are written as <angle-bracket-slots>, which a linter cannot
+  // tell apart from inline HTML.
+  "MD033": false,
+
+  // Repeated section names under different parents are intentional in the
+  // knowledge base (several docs carry their own "Commands", "Method").
+  "MD024": { "siblings_only": true },
+
+  // CHANGELOG.md and rejected-ideas.md entries lead with a bold label
+  // ("**Idea.**", "**What was tried.**") directly followed by prose, by
+  // design -- scannable without adding a heading level per entry. A linter
+  // cannot tell that apart from emphasis used as a heading.
+  "MD036": false,
+
+  "MD004": { "style": "dash" },
+  "MD007": { "indent": 2 },
+  "MD009": { "br_spaces": 0 },
+  "MD012": { "maximum": 1 },
+  "MD022": true,
+  "MD029": { "style": "ordered" },
+  "MD031": true,
+  "MD032": true,
+  "MD035": { "style": "---" },
+  "MD040": true,
+  "MD046": { "style": "fenced" },
+  "MD048": { "style": "backtick" },
+  "MD047": true,
+  "MD049": { "style": "asterisk" },
+  "MD050": { "style": "asterisk" }
+}

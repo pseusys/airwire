@@ -19,15 +19,42 @@ This repository hosts two related but separately-paced efforts:
    speaker+microphone link) — discovering the channel's transmittable features at runtime and
    adapting its encoding to them. Framing and bibliography only at this stage; no implementation.
 
-See [`docs/roadmap.md`](docs/roadmap.md) for the phased implementation plan for this track,
-starting with a platform-independent Python proof of concept of the crypto/framing/obfuscation
-core before any mobile app work begins, and [`docs/design-decisions.md`](docs/design-decisions.md)
-for the record of specific technical trade-offs made along the way, with the reasoning behind
-each.
+See [`TODO.md`](TODO.md) for the phased implementation plan for this track, starting with a
+platform-independent Python proof of concept of the crypto/framing/obfuscation core before any
+mobile app work began, and [`memory/wire-protocol.md`](memory/wire-protocol.md) for how that core
+actually works, with the reasoning behind the non-obvious choices.
 
 > **Note:** [`web-demo/README.md`](web-demo/README.md) documents a small standalone Angular page
 > that showcases both disguise mechanisms (text and image) in a browser. It is not part of the
 > product itself — see that file for its deliberately narrow scope.
+
+## Setup
+
+Three independent sub-projects, no shared build step — see [`core/README.md`](core/README.md) and
+[`web-demo/README.md`](web-demo/README.md) for their own quickstarts.
+
+```bash
+# core/ -- the real protocol implementation (Python 3.11+/3.12, Poetry)
+cd core && poetry install --all-extras && poetry poe generate && poetry poe train-stego-model
+
+# client/ -- Flutter Web app + Medium wrapper (Dart pub workspace)
+cd client/app && flutter pub get      # or: cd client/medium && dart pub get
+
+# web-demo/ -- standalone Angular disguise demo (Node 22, npm)
+cd web-demo && npm install
+```
+
+## Useful Commands
+
+```bash
+cd core && poetry poe test                            # pytest
+cd core && poetry poe lint                             # flake8 + black + mypy --strict
+cd client/app && flutter test                          # not run in CI yet
+cd client/medium && dart test                          # not run in CI yet
+cd web-demo && npx ng test --watch=false --browsers=ChromeHeadless
+```
+
+Full reference, with every flag actually used: [`memory/commands.md`](memory/commands.md).
 
 ## Core Concepts
 
@@ -41,11 +68,11 @@ All message history lives exclusively on the user's device.
 
 Every message carries a delivery status:
 
-| Status        | Meaning                                        |
-|---------------|-------------------------------------------------|
-| **Pending**   | Message is still being transmitted to the server |
-| **Sent**      | Server has received the message                  |
-| **Delivered** | Message was delivered to the recipient's device  |
+| Status | Meaning |
+| --- | --- |
+| **Pending** | Message is still being transmitted to the server |
+| **Sent** | Server has received the message |
+| **Delivered** | Message was delivered to the recipient's device |
 
 ### Timeouts and Retries
 
@@ -80,13 +107,13 @@ The server tracks each user's current transport mode and routes messages accordi
 
 Every message is a Protobuf structure containing:
 
-| Field       | Required | Description              |
-|-------------|----------|--------------------------|
-| `id`        | Yes      | Rolling 4-byte message ID |
-| `sender`    | Yes      | Sender identifier (phone number) |
-| `recipient` | Yes      | 16-byte receiver ID       |
-| `type`      | Yes      | Message type              |
-| `payload`   | No       | Optional message body     |
+| Field | Required | Description |
+| --- | --- | --- |
+| `id` | Yes | Rolling 4-byte message ID |
+| `sender` | Yes | Sender identifier (phone number) |
+| `recipient` | Yes | 16-byte receiver ID |
+| `type` | Yes | Message type |
+| `payload` | No | Optional message body |
 
 ## Encryption
 
@@ -99,14 +126,14 @@ The entire size-prefixed Protobuf message is sent over a TLS connection.
 
 Fully asynchronous encryption using **X25519** key exchange and **XChaCha20-Poly1305** for symmetric encryption.
 
-- **Service messages** (e.g. the initial handshake — see [`docs/handshake.md`](docs/handshake.md)
+- **Service messages** (e.g. the initial handshake — see [`memory/handshake.md`](memory/handshake.md)
   for the full session-establishment design) carry the full asymmetric overhead.
 - **Data message bodies** are encrypted symmetrically only, to save space.
 
 A data message body is cut into large **hyperslices** (configurable, ~1KB by default), and each
 hyperslice is encrypted as a single AEAD operation — one nonce and tag cover the whole hyperslice,
 not each individual outgoing message. That's what keeps the per-message overhead low; see
-[design decision #1](docs/design-decisions.md#1-minimizing-cryptography-overhead) for the
+[`memory/wire-protocol.md`](memory/wire-protocol.md) for the
 reasoning and the numbers behind it. The resulting ciphertext is split into small, message-sized
 **chunks**, each carrying only a cheap sequence number, preceded by one small header message
 (itself encrypted) describing how to reassemble and verify the chunks that follow. The receiver
@@ -118,7 +145,7 @@ retried.
 SMS is limited to 160 ASCII characters (160 bytes) per message. The exact overhead per hyperslice
 now depends on the configured hyperslice and chunk sizes rather than a single fixed table — see
 [`core/sources/chunking.py`](core/sources/chunking.py) for the mechanics, and
-[design decision #1](docs/design-decisions.md#1-minimizing-cryptography-overhead) for the current
+[`memory/wire-protocol.md`](memory/wire-protocol.md) for the current
 numbers with the shipped defaults: roughly 91% of raw bytes sent are message content rather than
 overhead, versus roughly 68% under an earlier, naive per-message encryption scheme.
 
@@ -139,6 +166,13 @@ To make MMS content appear benign, the app offers two encoding strategies:
 
 The core application (web mode + SMS mode) is free.
 **MMS support is a premium feature.**
+
+## Documentation
+
+- [`AGENTS.md`](AGENTS.md) — orientation, repo layout, and the working rules
+- [`memory/`](memory/README.md) — the knowledge base: how things work now, the house rules, and what was tried and rejected
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed, when, and the evidence
+- [`TODO.md`](TODO.md) — what's open
 
 ## License
 

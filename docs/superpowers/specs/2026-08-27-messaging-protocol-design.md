@@ -9,7 +9,8 @@
 > necessarily match it field-for-field once this spec is done. This document is the actual
 > deliverable.
 > **Relationship to the existing product docs:** [`README.md`](../../../README.md),
-> [`docs/design-decisions.md`](../design-decisions.md), and [`docs/handshake.md`](../handshake.md)
+> [`memory/wire-protocol.md`](../../../memory/wire-protocol.md), and
+> [`memory/handshake.md`](../../../memory/handshake.md)
 > describe an earlier, narrower design (SMS/MMS specifically, a relay server, ack/retry over an
 > assumed-lossy medium). This spec supersedes that shape with a **serverless, medium-agnostic**
 > protocol. Reconciling/updating those documents is a follow-up, not part of this spec.
