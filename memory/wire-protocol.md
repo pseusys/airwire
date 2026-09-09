@@ -34,13 +34,15 @@ One hyperslice's round trip, in order:
    `encode_atoms(data, nonce)` yields indivisible output units (raw bytes, base64 groups, Markov
    words, or — for images — exactly one atom, the whole synthesized PNG).
 4. **Pack.** `_greedy_pack` fills each wire chunk with as many whole atoms as fit under the chunk's
-   byte budget, starting a new chunk the moment the next atom would overflow it. This is why one
+   byte budget, starting a new chunk the moment the next atom would overflow it.
+This is why one
    encoding's output-length-per-input-byte doesn't need to be predictable in advance.
 5. **Header.** One `HyperchunkHeader` message (nonce, ciphertext length, chunk count, tag, chunk-ID
    width, chosen encoding) precedes the chunk sequence — itself serialized and AEAD-encrypted (and,
    optionally, disguised the same way payload atoms are) before transmission.
 6. **Send + retry.** `send_hyperchunk` sends `[header, chunk_0, chunk_1, ...]`, then waits for an
-   ack naming this exact `hyperchunk_id` with `success=True`. Anything else — wrong ID, malformed
+   ack naming this exact `hyperchunk_id` with `success=True`.
+Anything else — wrong ID, malformed
    ack, timeout — retries the *whole* hyperchunk (header included), up to `DEFAULT_MAX_RETRIES`.
 7. **Receive + reassemble.** `receive_hyperchunk` decrypts the header, gathers every named chunk
    index, reassembles and decodes the ciphertext, decrypts it, and sends back one ack.
@@ -93,7 +95,8 @@ folded into this file and `handshake.md`; its settled rejections are in
 ## Components
 
 - **`core/sources/chunking.py`** — the lifecycle above: `pack_hyperchunk`/`unpack_hyperchunk`,
-  `send_hyperchunk`/`receive_hyperchunk`, `_greedy_pack`. Owns no transport and no session state.
+  `send_hyperchunk`/`receive_hyperchunk`, `_greedy_pack`.
+Owns no transport and no session state.
 - **`core/sources/crypto.py`** — `Symmetric` (XChaCha20-Poly1305 AEAD), `Asymmetric` (X25519 with a
   keyed-XOR public-key-hiding trick), `derive_key`/`derive_nonce` (BLAKE2b, public/non-secret-safe
   derivation — safe as long as the derivation inputs never repeat for two different plaintexts under
@@ -104,14 +107,18 @@ folded into this file and `handshake.md`; its settled rejections are in
 - **`core/sources/arithmetic.py`** — the shared binary arithmetic coder (`BitCursor`, `BitAccumulator`,
   `candidate_ranges`, exact integer arithmetic, no floating point anywhere in the encode/decode path).
   Factored out of `markov.py` once `synthesis.py` needed the identical mechanism.
-- **`core/sources/markov.py`** — the text disguise. Frozen per-language Markov chains
+- **`core/sources/markov.py`** — the text disguise.
+Frozen per-language Markov chains
   (`sources/data/markov_*.json`, trained by `scripts/model.py` from `sources/corpus.py`'s Tatoeba
-  corpus). Every visited state's candidate order is shuffled by a nonce-derived permutation before
+  corpus).
+Every visited state's candidate order is shuffled by a nonce-derived permutation before
   `candidate_ranges` assigns bit ranges, so the nonce gates the whole walk, not just the cosmetic
   filler tail that completes an otherwise-truncated final sentence.
-- **`core/sources/synthesis.py` + `textures.py`** — the image disguise. Patch-based reversible
+- **`core/sources/synthesis.py` + `textures.py`** — the image disguise.
+Patch-based reversible
   texture synthesis (adapted from Wu & Wang 2015), four texture flavors, each its own
-  `ChunkEncoding` yielding exactly one atom (the whole PNG). The source texture's seed is derived
+  `ChunkEncoding` yielding exactly one atom (the whole PNG).
+The source texture's seed is derived
   from the hyperslice's own nonce — real per-message variety at zero extra wire cost, safe because
   texture choice needs no confidentiality of its own.
 - **`core/sources/handshake.py`** — see [`handshake.md`](handshake.md).

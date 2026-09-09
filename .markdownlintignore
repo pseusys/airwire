@@ -4,10 +4,3 @@ web-demo/.angular/
 web-demo/coverage/
 core/.venv/
 core/.cache/
-
-# Frozen historical archive from the superpowers brainstorming/writing-plans skill workflow
-# (design specs and implementation plans), and the separate airwave research-track proposal --
-# both predate this documentation layout and are not held to its house style retroactively.
-# See memory/README.md and AGENTS.md's repository layout for why these are referenced, not absorbed.
-docs/superpowers/
-docs/research-proposal.md

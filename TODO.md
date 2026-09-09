@@ -61,7 +61,8 @@ real messaging permission — the correct scope name was never confirmed against
 list; (3) whether `graph.user.messages` requires the two accounts to already be OK.ru contacts before
 messaging cold (a `group.isMessagesAllowed`-style gate exists elsewhere in the API, suggesting one
 might apply here too) is untested — `client/medium/lib/src/odnoklassniki_medium.dart` has no handling
-for this either way. All three were flagged as open risks in the (now-retired) Odnoklassniki
+for this either way.
+All three were flagged as open risks in the (now-retired) Odnoklassniki
 prototype design spec; none are blocking further `client/` development, since everything else in
 the medium wrapper is unit-tested against mocked HTTP.
 
@@ -99,7 +100,8 @@ relies on elsewhere) — don't assume it by analogy to the ack case, which turne
 before landing on a safe derivation there.
 
 **Why.** `sources/crypto.py`'s `derive_nonce` helper already exists for exactly this and currently has
-no caller in the data path. Flagged rather than attempted immediately specifically because the
+no caller in the data path.
+Flagged rather than attempted immediately specifically because the
 analogous ack-nonce work needed two rejected attempts before finding a safe derivation — this deserves
 its own scrutiny, not a quick copy of that reasoning.
 
@@ -107,7 +109,8 @@ its own scrutiny, not a quick copy of that reasoning.
 
 **What.** Voronoi and reaction-diffusion textures are still visibly more fragmented than their source
 after seed rows measurably improved them; widening the blend-cost window did not help further (see
-`memory/rejected-ideas.md`). Two untried directions remain: shrinking gap rows relative to seed rows,
+`memory/rejected-ideas.md`).
+Two untried directions remain: shrinking gap rows relative to seed rows,
 or trying Wu & Wang's own irregular scatter-then-fill-gaps layout after all.
 
 **How.** Either is a change to `core/sources/synthesis.py`'s row-placement logic; measure with the
@@ -115,7 +118,8 @@ same independent seam-MSE method the `OVERLAP` experiment used, against the same
 result is comparable to that entry.
 
 **Why.** Locally-stationary textures (`value_noise`) are already fine; this only affects two of four
-flavors, and round-trip correctness doesn't depend on visual quality — cosmetic, not blocking. See
+flavors, and round-trip correctness doesn't depend on visual quality — cosmetic, not blocking.
+See
 also D13 for a more fundamental alternative to tuning this one's parameters.
 
 ### D4. Cross-implementation test vectors
@@ -123,7 +127,8 @@ also D13 for a more fundamental alternative to tuning this one's parameters.
 **What.** Use `core/`'s Python implementation as the source of test vectors: encrypt with Python,
 assert a future client-side implementation decrypts it correctly, and vice versa.
 
-**How.** Not started. Depends on a client-side protocol implementation existing to test against —
+**How.** Not started.
+Depends on a client-side protocol implementation existing to test against —
 `client/`'s Dart port is drafted in `docs/superpowers/plans/` but not built yet.
 
 **Why.** Cheap insurance against a future mobile/client port silently drifting from the proven Python
@@ -147,7 +152,8 @@ local-only message storage — Silence-style background SMS send/receive (`SmsMa
 manifest-registered `SMS_RECEIVED` receiver).
 
 **How.** Testable via Android emulator SMS injection (`adb emu sms send`) between two emulator
-instances for the dev loop; two prepaid SIMs for carrier-reality validation before shipping. Three
+instances for the dev loop; two prepaid SIMs for carrier-reality validation before shipping.
+Three
 implementation plans for a pure-Dart `protocol/` package already exist, approved but unexecuted, in
 `docs/superpowers/plans/2026-08-30-protocol-core-dart.md`, `2026-08-30-handshake-dart.md`, and
 `2026-08-31-key-rotation-dart.md` — check these before drafting a new one; they target the
@@ -177,7 +183,8 @@ same crypto/framing, when the relay is unreachable).
 **How.** Not started; depends on D6/D7.
 
 **Why.** Silence already proved the direct-SMS transport mechanism works; airwire's disguise layer
-carried over it is the part Silence never had. See also E1 for the one genuine open decision in this
+carried over it is the part Silence never had.
+See also E1 for the one genuine open decision in this
 phase (SIM-bank gateway economics).
 
 ### D9. Reach extension (Phase 4)
@@ -199,35 +206,12 @@ reinvented (see the Bridgefy caution in `memory/rejected-ideas.md`).
 **What.** Convert a received, already-decrypted message into a vibration and/or camera-flash Morse
 playback, so it can be read without looking at or listening to the phone.
 
-**How.** Not started. Distinct from Morse *input*, which Gboard/Switch Control already provide for
+**How.** Not started.
+Distinct from Morse *input*, which Gboard/Switch Control already provide for
 free (see [`memory/rejected-ideas.md`](memory/rejected-ideas.md)) — existing OS notification
 flash/vibrate features only signal that something arrived, not the content itself.
 
 **Why.** Genuinely open accessibility gap, not covered by any existing prior art evaluated so far.
-
-### D11. Reflow markdown to one-sentence-per-line and full `markdownlint` compliance, then stop excluding `docs/superpowers/` and `docs/research-proposal.md` from CI
-
-**What.** Two related gaps, both currently carved out rather than fixed: (1)
-`python memory/scripts/verify_memory.py --strict` reports 296 "two sentences on one line" warnings
-across pre-existing docs (`core/README.md`, `web-demo/README.md`, `docs/superpowers/**`,
-`docs/research-proposal.md`) and this session's own new files (`AGENTS.md`, `CHANGELOG.md`,
-`TODO.md`, `memory/*.md`); (2) `docs/superpowers/**` and `docs/research-proposal.md` fail full
-`markdownlint-cli2` outright (MD032 blanks-around-lists, MD040 fenced-code-language, MD001
-heading-increment, MD060 table style) and are excluded from `.github/workflows/lint.yaml`'s
-markdown-lint step and `.markdownlintignore` rather than fixed.
-
-**How.** Reflow each file's prose to one sentence per line (see
-[`memory/dos-and-donts.md`](memory/dos-and-donts.md)'s Documentation section for why) and fix the
-markdownlint findings, then remove the `docs/superpowers`/`docs/research-proposal.md` exclusions
-from both `.markdownlintignore` and `lint.yaml`'s `globs`, and flip the verify step back to
-`python memory/scripts/verify_memory.py --strict`, all in the same commit as the last file that
-needed it.
-
-**Why.** Both rules exist for real reasons (a changed sentence producing a one-line diff; consistent
-rendering), but reflowing/fixing ~400 findings by hand across a frozen historical archive and a
-separate research track risks introducing errors faster than it fixes style, and doesn't belong in
-the same pass as reorganizing where the docs live. The exclusions are deliberate and documented in
-`.markdownlintignore`'s own comment, not an oversight.
 
 ### D12. Community broadcast (Phase 6)
 
@@ -246,12 +230,15 @@ flavors in a live browser session, then upscaled the actual PNG pixel data 6× w
 so patch edges stay crisp): the image disguise's blocky, "concatenated from little squares" look is
 the literal designed granularity of the technique — a fixed grid of 8×8-pixel patches
 (`DEFAULT_PATCH_SIZE`), 16 patches wide (`DEFAULT_CANVAS_WIDTH`), alternating untouched seed rows
-with synthesized gap rows chosen one patch at a time. D3's two untried directions (shrink gap rows,
-try Wu & Wang's irregular scatter) are incremental tuning of that same grid. This item is a more
+with synthesized gap rows chosen one patch at a time.
+D3's two untried directions (shrink gap rows,
+try Wu & Wang's irregular scatter) are incremental tuning of that same grid.
+This item is a more
 fundamental alternative: explore generating the *entire* canvas from the whole payload at once,
 so the result reads as one uniform image rather than a patchwork of independently-chosen tiles.
 
-**How.** Not scoped yet — an open research direction, not a concrete implementation plan. Starting
+**How.** Not scoped yet — an open research direction, not a concrete implementation plan.
+Starting
 points worth considering: whether the arithmetic-coding walk can be restructured to choose a whole
 row's (or the whole canvas's) patch assignment jointly instead of greedily one patch at a time,
 while remaining exactly invertible; whether a different reversible-embedding technique entirely
@@ -261,7 +248,8 @@ post-blending pass over the existing patch-based output that never touches which
 [`memory/wire-protocol.md`](memory/wire-protocol.md)'s arithmetic-coding contract).
 
 **Why.** The current approach's regularity is a known, deliberate simplification (see
-`memory/rejected-ideas.md`) that trades visual uniformity for implementation simplicity. D3's tuning
+`memory/rejected-ideas.md`) that trades visual uniformity for implementation simplicity.
+D3's tuning
 ideas address two of four flavors incrementally; this asks whether the underlying grid constraint
 itself can be lifted, which would be a bigger win if it turns out feasible at all.
 
@@ -272,33 +260,42 @@ itself can be lifted, which would be a bigger win if it turns out feasible at al
 ### E1. SIM-bank gateway economics (part of Phase 3)
 
 The relay server's own SMS sending can run on a paid API (Twilio-style) or a small bank of
-prepaid-SIM Android phones. A pure ops decision, no app-side work either way, but it materially
-affects per-message cost at the population this project targets. Needs a decision, not effort, and
+prepaid-SIM Android phones.
+A pure ops decision, no app-side work either way, but it materially
+affects per-message cost at the population this project targets.
+Needs a decision, not effort, and
 isn't blocking anything before Phase 3.
 
 ### E2. Push-notification transport (Phase 7) — optional, opt-in, deliberately last
 
 A third transport mode (alongside Web and SMS) for restrictive/firewalled networks that block general
-internet but can't block Apple/Google's push infrastructure. Two real costs make this a decision, not
+internet but can't block Apple/Google's push infrastructure.
+Two real costs make this a decision, not
 just a task: **privacy** (Apple/Google can see, and governments have compelled disclosure of,
 push-token metadata — who's talking to whom, when; the one mode where a third party sits inside
 airwire's trust model, must be clearly labeled as lower-privacy, never a silent fallback) and
 **platform risk** (using FCM as a generic message channel is also how real Android malware operates —
-needs a transparent, disclosed implementation to avoid tripping app-store malware heuristics). Not
+needs a transparent, disclosed implementation to avoid tripping app-store malware heuristics).
+Not
 "serverless" despite appearances — needs the Phase 2 relay server's privileged credentials regardless.
 
 ### E3. Decide whether `core/`'s historical-narrative docstrings should move to `CHANGELOG.md`
 
-Found during A3's coding-guidelines review. Several `core/sources/*.py` module docstrings narrate
+Found during A3's coding-guidelines review.
+Several `core/sources/*.py` module docstrings narrate
 what changed and when, inline — `markov.py`'s "Known limitations" section has four "Resolved: X used
 to Y, now Z" bullets; `chunking.py`'s "Scope and open questions" section similarly narrates the
 ack-nonce-derivation attempt-and-revert inline, even though that same history now also lives in
-[`memory/rejected-ideas.md`](memory/rejected-ideas.md). This is a genuine, pervasive, clearly
+[`memory/rejected-ideas.md`](memory/rejected-ideas.md).
+This is a genuine, pervasive, clearly
 *deliberate* style predating this session's `memory/coding-guidelines.md`, which says "Comments
-describe the code, never how it came to be... History goes in `CHANGELOG.md`, reasoning in
-`memory/`." Not rewritten silently as part of A3 — the pattern is core/'s established documentation
+describe the code, never how it came to be...
+History goes in `CHANGELOG.md`, reasoning in
+`memory/`.
+" Not rewritten silently as part of A3 — the pattern is core/'s established documentation
 voice across its most-explained modules, and unwinding it is a real editing task, not a mechanical
-fix. Needs a decision: (a) keep it as a working, intentional exception — arguably valuable context
+fix.
+Needs a decision: (a) keep it as a working, intentional exception — arguably valuable context
 sitting physically next to the code it explains, hasn't caused a real problem — and update
 `memory/coding-guidelines.md`'s "Everywhere" rule to say so explicitly; or (b) actually migrate this
 narrative out into `CHANGELOG.md`/`memory/`'s proper homes across every affected module.

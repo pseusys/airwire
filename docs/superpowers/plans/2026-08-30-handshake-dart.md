@@ -10,15 +10,18 @@ recovery from one-sided session loss.
 **Architecture:** Two new files in the same `protocol/` package: `peer.dart` (the `PeerRecord` data
 model and its key-derivation math) and `handshake.dart` (certificates and the top-level `PeerSession`
 that ties everything — key selection, dispatch, recovery — into one testable API a future medium
-wrapper can call directly). One small but necessary extension to `envelope.dart` from the prior plan,
+wrapper can call directly).
+One small but necessary extension to `envelope.dart` from the prior plan,
 in Task 1, done first since everything else depends on it.
 
-**Tech Stack:** Same as the protocol-core plan — Dart 3, `package:cryptography`, `package:test`. No
+**Tech Stack:** Same as the protocol-core plan — Dart 3, `package:cryptography`, `package:test`.
+No
 new dependencies.
 
 **Scope boundary:** Key rotation (§6) is a separate follow-on plan — `PeerRecord` here has the fields
 rotation needs (counters, `root_key`, both directional keys) but nothing in this plan triggers a
-rotation. Peer-record *persistence* (surviving app restarts) is also out of scope — `PeerSession`
+rotation.
+Peer-record *persistence* (surviving app restarts) is also out of scope — `PeerSession`
 holds its `PeerRecord` in memory; a future Hive-backed layer is expected to serialize/restore it,
 not this plan.
 
@@ -46,11 +49,13 @@ not this plan.
 > "Certificate header nonce".
 
 **Files:**
+
 - Modify: `protocol/lib/src/envelope.dart`
 - Modify: `protocol/test/envelope_pack_test.dart`
 - Modify: `protocol/test/envelope_reassemble_test.dart`
 
 **Interfaces:**
+
 - Consumes: everything `envelope.dart` (protocol-core Tasks 6–7) already consumes, unchanged.
 - Produces (modifies existing signatures, additive/optional so no existing caller breaks):
   - `Future<PackedMessage> packMessage({..., int? messageCounter, bool transmitNonce = false})` —
@@ -409,11 +414,13 @@ git commit -m "feat: add transmit-nonce mode to the envelope for certificate exc
 ## Task 2: PeerRecord and key derivation
 
 **Files:**
+
 - Create: `protocol/lib/src/peer.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/peer_test.dart`
 
 **Interfaces:**
+
 - Consumes: `computeSharedSecret`, `deriveKey`, `X25519KeyPair` (Task 2, `crypto.dart`);
   `SimplePublicKey`, `SecretKey` (from `package:cryptography`).
 - Produces:
@@ -640,11 +647,13 @@ git commit -m "feat: add PeerRecord and canonically-ordered key derivation"
 ## Task 3: Certificate message
 
 **Files:**
+
 - Create: `protocol/lib/src/handshake.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/handshake_certificate_test.dart`
 
 **Interfaces:**
+
 - Consumes: nothing from this package yet (pure encode/decode of a byte layout).
 - Produces:
   - `class ParsedCertificate { SimplePublicKey ephemeralPublicKey; int rotationInterval; }` —
@@ -659,7 +668,8 @@ git commit -m "feat: add PeerRecord and canonically-ordered key derivation"
 `sender_id` is not part of the certificate itself: the receiver already has to know it before it
 can even pick which `bootstrap_key` to try decrypting with, and a successful AEAD tag already
 proves it was correct — a redundant copy in the plaintext would add no assurance and just cost
-bytes. Plaintext is a fixed 34 bytes (`ephemeral_public_key` + `rotation_interval`), no
+bytes.
+Plaintext is a fixed 34 bytes (`ephemeral_public_key` + `rotation_interval`), no
 length-prefix framing needed at all.
 
 - [ ] **Step 1: Write the failing tests**
@@ -805,10 +815,12 @@ git commit -m "feat: add certificate message encode/decode and bootstrap key"
 ## Task 4: Sending a certificate
 
 **Files:**
+
 - Modify: `protocol/lib/src/handshake.dart`
 - Modify: `protocol/test/handshake_certificate_test.dart`
 
 **Interfaces:**
+
 - Consumes: `bootstrapKey`, `encodeCertificate` (Task 3, same file); `generateX25519KeyPair`,
   `X25519KeyPair` (Task 2, `crypto.dart`); `packMessage` (protocol-core Task 6, extended Task 1
   above); `ChunkEncoding` (protocol-core Task 4).
@@ -930,10 +942,12 @@ git commit -m "feat: add sendCertificate"
 ## Task 5: Completing a handshake
 
 **Files:**
+
 - Modify: `protocol/lib/src/handshake.dart`
 - Test: `protocol/test/handshake_complete_test.dart`
 
 **Interfaces:**
+
 - Consumes: `ParsedCertificate`, `OutgoingCertificate`, `sendCertificate` (Task 3-4, same file);
   `computeSharedSecret` (Task 2, `crypto.dart`); `deriveSessionKeys`, `PeerRecord` (Task 2, `peer.dart`).
 - Produces:
@@ -1046,11 +1060,13 @@ git commit -m "feat: add completeHandshake"
 ## Task 6: PeerSession — key selection, dispatch, and recovery
 
 **Files:**
+
 - Create: `protocol/lib/src/session.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/session_test.dart`
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 1–5 (`PeerRecord`, `sendCertificate`, `completeHandshake`,
   `decodeCertificate`, `bootstrapKey`), plus `packMessage`, `Reassembler`, `ChunkEncoding` (protocol-core).
 - Produces:
@@ -1389,7 +1405,8 @@ git commit -m "feat: add PeerSession, completing protocol spec §5"
   `PeerSession.sendData`/`receiveFragment` and extending the envelope's header to actually carry
   and parse rotation material (deferred in the protocol-core plan, `n_tag`'s formula already covers
   it).
-- **Peer-record persistence** — `PeerSession` holds its `PeerRecord` in memory only. A future
+- **Peer-record persistence** — `PeerSession` holds its `PeerRecord` in memory only.
+A future
   Hive-backed layer needs to serialize it (including both counters, whose correctness the header
   nonce depends on) and pass it back in via `PeerSession`'s `existingRecord` constructor parameter
   on app restart.

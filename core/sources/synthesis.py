@@ -109,8 +109,8 @@ def _candidate_weights(library: PatchLibrary, gap_row: List[np.ndarray], row: in
     its top/bottom edges against the seed rows above and below (always known -- seed content is a
     fixed function of position, never of anything already placed) and its left edge against the
     already-chosen gap patch to its left, if any. Comparing a wider overlap region instead of just
-    the touching row of pixels was tried and measurably made this worse, not better -- see design
-    decision #4 for the measurements and the reasoning for why."""
+    the touching row of pixels was tried and measurably made this worse, not better -- see
+    memory/rejected-ideas.md's OVERLAP entry for the measurements and the reasoning for why."""
 
     above = _seed_patch(library, (row - 1) // 2, col, canvas_width)
     below = _seed_patch(library, (row + 1) // 2, col, canvas_width)

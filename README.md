@@ -1,6 +1,7 @@
 # airwire
 
-A hybrid messaging application that seamlessly switches between web and SMS transport.
+A messaging application that encrypts and disguises messages before sending them over whatever
+medium the conversation actually uses.
 All messages are stored locally on the user's device — the server acts only as a relay, never persisting message content.
 
 ## Project Scope — Two Tracks
@@ -8,16 +9,24 @@ All messages are stored locally on the user's device — the server acts only as
 This repository hosts two related but separately-paced efforts:
 
 1. **airwire (product track) — this document.** The immediate, buildable goal: encrypt and
-   decrypt **text and images** under a pre-shared key and move them over SMS/MMS. Each payload is
+   decrypt **text and images** under a pre-shared key and move them over a real transport medium.
+Each payload is
    sent either as a *raw* encrypted-and-encoded blob, or *steganographically* disguised as benign
-   content — human-like text via Markov chains, or an information-bearing image. Everything below
+   content — human-like text via Markov chains, or an information-bearing image.
+Right now that means testing against a real messenger-backed medium (Odnoklassniki, via OAuth —
+   see [`memory/medium.md`](memory/medium.md)); SMS/MMS was the original transport concept this
+   product was scoped around, and remains one, but nothing SMS-specific is built or tested yet —
+   see [`memory/medium.md`](memory/medium.md)'s "Future medium idea" section for that reasoning,
+   kept separate from what's actually running today.
+Everything below
    specifies this track.
 
 2. **airwave (research track) — see [`docs/research-proposal.md`](docs/research-proposal.md).**
    An exploratory research proposal for an adaptive, channel-agnostic protocol that establishes
    **audio** communication over an *unknown* channel (VoIP, a lossy voice codec, or an open-air
    speaker+microphone link) — discovering the channel's transmittable features at runtime and
-   adapting its encoding to them. Framing and bibliography only at this stage; no implementation.
+   adapting its encoding to them.
+Framing and bibliography only at this stage; no implementation.
 
 See [`TODO.md`](TODO.md) for the phased implementation plan for this track, starting with a
 platform-independent Python proof of concept of the crypto/framing/obfuscation core before any
@@ -84,25 +93,6 @@ The server enforces timeouts with retries on every message:
 
 **Exception:** notification messages (e.g. presence updates) are fire-and-forget — no retransmission, no timeout.
 
-## Transport Modes
-
-The server tracks each user's current transport mode and routes messages accordingly.
-
-### Web Mode
-
-- **Sending:** the client calls the server API directly; the server acknowledges.
-- **Receiving:** the server sends a Firebase push notification, the client comes online, downloads the message, and acknowledges.
-
-### SMS Mode
-
-- **Sending:** the client splits the message into SMS-sized pieces and sends them; the server acknowledges via SMS.
-- **Receiving:** the server does the same in reverse.
-
-### Mode Switching
-
-1. When a device comes online, it calls the API to declare **web mode** (unless the user has restricted the app to SMS-only).
-2. When a device goes offline, it sends an SMS to declare **SMS mode** (if available, unless the user has restricted the app to web-only).
-
 ## Message Format
 
 Every message is a Protobuf structure containing:
@@ -110,19 +100,12 @@ Every message is a Protobuf structure containing:
 | Field | Required | Description |
 | --- | --- | --- |
 | `id` | Yes | Rolling 4-byte message ID |
-| `sender` | Yes | Sender identifier (phone number) |
+| `sender` | Yes | Sender identifier (medium-specific — e.g. an OAuth-derived user ID) |
 | `recipient` | Yes | 16-byte receiver ID |
 | `type` | Yes | Message type |
 | `payload` | No | Optional message body |
 
 ## Encryption
-
-### Web Mode
-
-Standard TLS.
-The entire size-prefixed Protobuf message is sent over a TLS connection.
-
-### SMS Mode
 
 Fully asynchronous encryption using **X25519** key exchange and **XChaCha20-Poly1305** for symmetric encryption.
 
@@ -132,40 +115,26 @@ Fully asynchronous encryption using **X25519** key exchange and **XChaCha20-Poly
 
 A data message body is cut into large **hyperslices** (configurable, ~1KB by default), and each
 hyperslice is encrypted as a single AEAD operation — one nonce and tag cover the whole hyperslice,
-not each individual outgoing message. That's what keeps the per-message overhead low; see
+not each individual outgoing message.
+That's what keeps the per-message overhead low; see
 [`memory/wire-protocol.md`](memory/wire-protocol.md) for the
-reasoning and the numbers behind it. The resulting ciphertext is split into small, message-sized
+reasoning and the numbers behind it.
+The resulting ciphertext is split into small, message-sized
 **chunks**, each carrying only a cheap sequence number, preceded by one small header message
-(itself encrypted) describing how to reassemble and verify the chunks that follow. The receiver
+(itself encrypted) describing how to reassemble and verify the chunks that follow.
+The receiver
 acknowledges each hyperslice as a whole (also encrypted); on any failure, the whole hyperslice is
 retried.
 
-### SMS Size Budget
+### Chunk Size Budget
 
-SMS is limited to 160 ASCII characters (160 bytes) per message. The exact overhead per hyperslice
-now depends on the configured hyperslice and chunk sizes rather than a single fixed table — see
-[`core/sources/chunking.py`](core/sources/chunking.py) for the mechanics, and
-[`memory/wire-protocol.md`](memory/wire-protocol.md) for the current
+The wire chunk budget is configurable per medium — see [`core/sources/chunking.py`](core/sources/chunking.py)
+for the mechanics, and [`memory/wire-protocol.md`](memory/wire-protocol.md) for the current
 numbers with the shipped defaults: roughly 91% of raw bytes sent are message content rather than
 overhead, versus roughly 68% under an earlier, naive per-message encryption scheme.
-
-This constraint means voice notes are realistically transferable over MMS only.
-
-## MMS Support (Premium)
-
-Users can opt in to MMS transport.
-The process follows the same chunked protocol as SMS, but with larger payloads.
-To make MMS content appear benign, the app offers two encoding strategies:
-
-1. **Markov-chain text** — the encrypted payload is processed and encoded into human-like natural language text.
-2. **Image steganography** — the payload is embedded into a generated image (the image appears random/noisy).
-
-> **Note:** MMS availability varies by country and carrier.
-
-## Pricing
-
-The core application (web mode + SMS mode) is free.
-**MMS support is a premium feature.**
+The original defaults were sized around SMS's 160-byte budget and an MMS-scale attachment budget —
+see [`memory/medium.md`](memory/medium.md)'s "Future medium idea" section for that reasoning,
+kept separate from what's actually tested today.
 
 ## Documentation
 
@@ -176,5 +145,6 @@ The core application (web mode + SMS mode) is free.
 
 ## License
 
-Proprietary. All rights reserved — no license is granted to use, copy, modify, or distribute this
+Proprietary.
+All rights reserved — no license is granted to use, copy, modify, or distribute this
 code.

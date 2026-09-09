@@ -1,6 +1,6 @@
 # Research Proposal - *airwave*
 
-### A channel-agnostic adaptive transport for encrypted data over unknown lossy channels - physical *or* semantic
+A channel-agnostic adaptive transport for encrypted data over unknown lossy channels - physical *or* semantic.
 
 > **Status:** research framing / proposal (v0). No implementation intended yet.
 > **Working codename:** *airwave* - the exploratory sibling of the [airwire](../README.md) messaging product.
@@ -111,7 +111,7 @@ The feature abstraction is shaped by its signal-processing origins (see §5.1 on
 
 ## 5. System architecture
 
-```
+```text
    bytes            feature events                 signal
  ┌────────┐   ┌────────────────────────┐   ┌───────────────────────┐
  │ crypto │──▶│   SCHEDULER (the core) │──▶│  HEAD (pluggable)     │──▶ ((( channel )))
@@ -167,7 +167,7 @@ The core's value is that all of the following share one scheduler, one probing/n
 They fall into two families.
 
 | Family | Head | Features | "Channel" (what mangles them) | Status / novelty |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | **Physical (streaming)** | Algorithmic audio | pitch, loudness, spectral tilt, duration | VoIP / vocoder / room acoustics | Prototype; core validated here |
 | | Neural-speech audio | same array → realistic voice `[wavenet2016, tacotron2]` | vocoder + covertness | Research; medium novelty |
 | **Semantic (non-streaming)** | Image (airwire's head) | generated-image params / DCT coeffs | **platform recompression** (JPEG, resize) | Near-term product head; robust-stego is hard |
@@ -236,7 +236,7 @@ Integrity/authenticity must hold even when the feature stream is noisy, and (wit
 ## 8. Phased plan
 
 | Phase | Goal | Deliverable |
-|---|---|---|
+| --- | --- | --- |
 | **P0** | Formalise the feature & channel model; simulate capacity/resolve-cost trade-offs | Model + simulator, validation of RQ2 in sim |
 | **P1** | Algorithmic audio head + scheduler over the clean VoIP channel | End-to-end link, no adaptation |
 | **P2** | Probing + capability agreement; add the codec and open-air channels | Adaptive link across all three audio channels (RQ1, RQ3) |

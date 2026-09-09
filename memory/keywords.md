@@ -22,7 +22,7 @@ Three to six triggers per document; the words a user would say, including the fa
 | how do I run, command, invocation, flags, rebuild, entrypoint, script to run, poe, npm, flutter, dart test | [`commands.md`](commands.md) |
 | how does it work, why does it do that, hyperslice, hyperchunk, chunking, arithmetic coding, markov, texture synthesis, source of truth | [`wire-protocol.md`](wire-protocol.md) |
 | handshake, TOFU, session key, rotation, directional key, bootstrap_key, obf_mode, X25519, post-quantum | [`handshake.md`](handshake.md) |
-| medium, transport, send, receive, maxMessageSize, provider, which platform | [`medium.md`](medium.md) |
+| medium, transport, send, receive, maxMessageSize, provider, which platform, SMS, MMS | [`medium.md`](medium.md) |
 | workflow, commit, refactor, is this ok to change, review, evidence | [`dos-and-donts.md`](dos-and-donts.md) |
 | style, lint, formatting, type hints, imports, naming, line length, flake8, black, mypy, flutter_lints, eslint | [`coding-guidelines.md`](coding-guidelines.md) |
 | again, every time, repetitive, by hand, automate, script this | [`automation-scripts.md`](automation-scripts.md) |

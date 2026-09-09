@@ -8,10 +8,12 @@ disguise) — crypto primitives, the shared arithmetic coder, `ChunkEncoding` (P
 and pack/reassemble of a logical message into medium-sized wire fragments.
 
 **Architecture:** A pure-Dart package (no Flutter dependency) at `protocol/`, importable later by
-the Flutter app as `package:airwire_protocol/airwire_protocol.dart`. Each layer from the spec is one
+the Flutter app as `package:airwire_protocol/airwire_protocol.dart`.
+Each layer from the spec is one
 file with one job: `crypto.dart` (primitives), `arithmetic.dart` (the shared coder), `encodings.dart`
 (the `ChunkEncoding` interface plus Plain/Base64), `markov.dart` (the text disguise), `envelope.dart`
-(pack/reassemble, tying the rest together). This is an **independent** Dart implementation of the
+(pack/reassemble, tying the rest together).
+This is an **independent** Dart implementation of the
 spec, not a port of `core/`'s Python — no wire or byte-level compatibility with `core/` is required
 or attempted (only two instances of *this* Dart implementation ever need to talk to each other); the
 arithmetic coder specifically is grounded directly against `core/sources/arithmetic.py`'s exact
@@ -21,10 +23,12 @@ algorithm since that one *is* worth porting faithfully (subtle, already-debugged
 (X25519, XChaCha20-Poly1305, BLAKE2b — pure-Dart fallback on every platform), `package:test`.
 
 **Scope boundary:** This plan covers §4 only — the envelope/fragmentation/disguise data path, given
-a symmetric key from *outside* this module. The §5 handshake (certificate exchange, peer records,
+a symmetric key from *outside* this module.
+The §5 handshake (certificate exchange, peer records,
 session-key derivation) and §6 key rotation are follow-on plans, deferred deliberately so this one
 stays reviewable and independently testable — `packMessage`/`Reassembler` below take a `SecretKey`
-directly, with no opinion on how it was obtained. Image-steganography disguise (`SYNTHESIS_*`) is
+directly, with no opinion on how it was obtained.
+Image-steganography disguise (`SYNTHESIS_*`) is
 also out of scope — a separate, largely independent porting effort (procedural texture generation,
 patch library, PNG codec) that doesn't block anything here, deferred the same way medium-interface
 and the Odnoklassniki wrapper were.
@@ -48,6 +52,7 @@ and the Odnoklassniki wrapper were.
 ## Task 1: Package scaffolding
 
 **Files:**
+
 - Create: `protocol/pubspec.yaml`
 - Create: `protocol/analysis_options.yaml`
 - Create: `protocol/lib/airwire_protocol.dart`
@@ -55,6 +60,7 @@ and the Odnoklassniki wrapper were.
 - Test: `protocol/test/airwire_protocol_test.dart`
 
 **Interfaces:**
+
 - Produces: `protocolLibraryVersion` (a `String` constant), importable via
   `package:airwire_protocol/airwire_protocol.dart` — proves the package, its dependency
   resolution, and `dart test` all work end to end before any real logic is written.
@@ -100,7 +106,7 @@ dev_dependencies:
 include: package:lints/recommended.yaml
 ```
 
-```
+```text
 # protocol/.gitignore
 .dart_tool/
 .packages
@@ -139,11 +145,13 @@ git commit -m "chore: scaffold airwire_protocol Dart package"
 ## Task 2: Crypto primitives
 
 **Files:**
+
 - Create: `protocol/lib/src/crypto.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/crypto_test.dart`
 
 **Interfaces:**
+
 - Consumes: nothing (first real logic in the package).
 - Produces (all in `package:airwire_protocol/src/crypto.dart`, re-exported from the barrel file):
   - `Uint8List randomBytes(int length)`
@@ -396,11 +404,13 @@ git commit -m "feat: add X25519/XChaCha20-Poly1305/BLAKE2b crypto primitives"
 ## Task 3: Arithmetic coder primitives
 
 **Files:**
+
 - Create: `protocol/lib/src/arithmetic.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/arithmetic_test.dart`
 
 **Interfaces:**
+
 - Consumes: nothing (self-contained; ported directly from `core/sources/arithmetic.py`, verified
   line-by-line against that file, not reconstructed from memory).
 - Produces:
@@ -742,11 +752,13 @@ git commit -m "feat: port the shared arithmetic coder from core/sources/arithmet
 ## Task 4: ChunkEncoding interface, Plain and Base64
 
 **Files:**
+
 - Create: `protocol/lib/src/encodings.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/encodings_test.dart`
 
 **Interfaces:**
+
 - Consumes: nothing directly (Plain/Base64 don't need the arithmetic coder).
 - Produces:
   - `class DecodeResult { Uint8List plaintext; int consumedWireBytes; }`
@@ -948,11 +960,13 @@ git commit -m "feat: add ChunkEncoding interface with Plain and Base64"
 ## Task 5: Markov-chain text disguise
 
 **Files:**
+
 - Create: `protocol/lib/src/markov.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/markov_test.dart`
 
 **Interfaces:**
+
 - Consumes: `BitCursor`, `BitAccumulator`, `candidateRanges`, `commonLeadingBits`, `stripTopBits`
   (Task 3, `arithmetic.dart`); `ChunkEncoding`, `DecodeResult` (Task 4, `encodings.dart`).
 - Produces:
@@ -1272,11 +1286,13 @@ git commit -m "feat: port the Markov-chain text disguise from core/sources/marko
 > same key.
 
 **Files:**
+
 - Create: `protocol/lib/src/envelope.dart`
 - Modify: `protocol/lib/airwire_protocol.dart` (export)
 - Test: `protocol/test/envelope_pack_test.dart`
 
 **Interfaces:**
+
 - Consumes: `aeadEncrypt`, `streamEncrypt`, `deriveKey`, `randomBytes`, `aeadNonceSize` (Task 2,
   `crypto.dart`); `ChunkEncoding` (Task 4, `encodings.dart`); `SecretKey` (from `package:cryptography`).
 - Produces:
@@ -1643,10 +1659,12 @@ git commit -m "feat: add envelope packing (protocol spec §4 wire shape)"
 ## Task 7: Envelope reassembly
 
 **Files:**
+
 - Modify: `protocol/lib/src/envelope.dart`
 - Test: `protocol/test/envelope_reassemble_test.dart`
 
 **Interfaces:**
+
 - Consumes: `packMessage`, `PackedMessage`, `_headerNonceFor`, `_dataNonceFor`, `_computeNTag`
   (Task 6, same file); `streamDecrypt`, `aeadDecrypt` (Task 2, `crypto.dart`); `ChunkEncoding`,
   `DecodeResult` (Task 4, `encodings.dart`).
@@ -1965,9 +1983,11 @@ git commit -m "feat: add envelope reassembly, completing the protocol spec §4 d
 
 ## What's next (not part of this plan)
 
-- **§5 handshake and peer records** — certificate exchange, TOFU, session-loss recovery. Needs
+- **§5 handshake and peer records** — certificate exchange, TOFU, session-loss recovery.
+Needs
   `packMessage`/`Reassembler` above as its transport (a certificate *is* a logical message), so this
-  plan is its prerequisite, not a parallel track. This is also where `messageCounter` persistence
+  plan is its prerequisite, not a parallel track.
+This is also where `messageCounter` persistence
   has to live: `packMessage`/`Reassembler` both require it as a plain caller-supplied `int` and
   correctness (header-nonce uniqueness) depends on it never resetting or repeating for a given key
   across app restarts — the peer record is the natural owner of that state, alongside the

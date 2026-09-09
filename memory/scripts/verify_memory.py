@@ -21,6 +21,7 @@ Run it from the repository root:
     python memory/scripts/verify_memory.py
     python memory/scripts/verify_memory.py --strict   # style problems fail too
     python memory/scripts/verify_memory.py --quiet    # errors only, no summary
+    python memory/scripts/verify_memory.py --fix      # reflow one-sentence-per-line violations, then exit
 """
 
 from __future__ import annotations
@@ -202,6 +203,51 @@ def sentence_breaks(line: str) -> list[int]:
     return [match.start() + 1 for match in SENTENCE_BREAK.finditer(body) if not ABBREV.search(body[: match.start() + 1].rstrip())]
 
 
+def fix_sentence_breaks(root: str, report: Report) -> None:
+    """Split every flagged line at each `sentence_breaks` offset, in place.
+
+    Reuses the exact same detection `check_style` warns with, so a fixed file is
+    guaranteed to report zero "two sentences on one line" warnings afterward.
+    Never touches fenced code blocks, for the same reason `check_style` skips them.
+    """
+
+    fixed_files = 0
+    fixed_lines = 0
+    for rel in markdown_files(root):
+        text = read(root, rel)
+        lines = text.splitlines()
+        out: list[str] = []
+        in_fence = False
+        changed = False
+        for line in lines:
+            if FENCE.match(line):
+                in_fence = not in_fence
+                out.append(line)
+                continue
+            breaks = [] if in_fence else sentence_breaks(line)
+            if not breaks:
+                out.append(line)
+                continue
+            changed = True
+            fixed_lines += 1
+            # Each offset lands right after the sentence-ending punctuation, before
+            # any closing quote/paren and the whitespace run that follows -- so the
+            # first piece is already clean (and keeps its original leading
+            # indentation, e.g. a nested list's), but every later piece needs both
+            # ends stripped of what the offset left behind.
+            start = 0
+            for index, offset in enumerate(breaks):
+                piece = line[start:offset]
+                out.append(piece if index == 0 else piece.strip())
+                start = offset
+            out.append(line[start:].strip())
+        if changed:
+            fixed_files += 1
+            with open(join(root, rel), "w", encoding=ENCODING) as handle:
+                handle.write(NEWLINE.join(out) + NEWLINE)
+    report.ok(f"reflowed {fixed_lines} lines across {fixed_files} files")
+
+
 def check_style(root: str, report: Report) -> None:
     """The markdown conventions that a config-driven linter cannot express."""
     for rel in markdown_files(root):
@@ -250,12 +296,20 @@ def main() -> int:
     parser.add_argument("--root", default=".", help="repository root (default: .)")
     parser.add_argument("--strict", action="store_true", help="style problems fail the run")
     parser.add_argument("--quiet", action="store_true", help="print problems only")
+    parser.add_argument("--fix", action="store_true", help="reflow one-sentence-per-line violations in place, then exit")
     args = parser.parse_args()
 
     root = abspath(args.root)
     if not isdir(join(root, MEMORY_DIR)):
         print(f"no {MEMORY_DIR}/ directory under {root}; run from the repository root", file=stderr)
         return EXIT_MISUSE
+
+    if args.fix:
+        report = Report()
+        fix_sentence_breaks(root, report)
+        for line in report.passed:
+            print(f"ok     {line}")
+        return EXIT_OK
 
     report = Report()
     check_links(root, report)

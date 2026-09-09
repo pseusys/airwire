@@ -35,9 +35,7 @@ jobs:
       - name: Lint workflows 🧪
         uses: raven-actions/actionlint@v2
 
-      # Excludes web-demo/node_modules (vendored) and docs/superpowers/ + docs/research-proposal.md
-      # (a frozen historical archive and a separate research track, predating this layout's house
-      # style -- see .markdownlintignore).
+      # Excludes only vendored/generated dirs -- see .markdownlintignore.
       - name: Lint markdown 📝
         uses: DavidAnson/markdownlint-cli2-action@v19
         with:
@@ -48,8 +46,6 @@ jobs:
             !web-demo/.angular
             !core/.venv
             !core/.cache
-            !docs/superpowers
-            !docs/research-proposal.md
 
       - name: Setup Python 🐍
         uses: actions/setup-python@v6
@@ -62,9 +58,7 @@ jobs:
           args: 'check --config memory/scripts/ruff.toml memory/scripts'
 
       # Links resolve, both indexes match the files on disk, and the markdown
-      # house rules hold. Not --strict yet: see TODO.md's one-sentence-per-line
-      # reflow item -- turning that flag on today would fail on ~300 pre-existing
-      # and new-but-not-yet-reflowed style warnings, not a real regression.
+      # house rules hold. --strict: style problems fail too, not just structural ones.
       - name: Verify the knowledge base 🧠
         shell: bash
-        run: python memory/scripts/verify_memory.py
+        run: python memory/scripts/verify_memory.py --strict

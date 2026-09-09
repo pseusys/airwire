@@ -71,10 +71,12 @@ Still-draft specs describing not-yet-implemented work (e.g. a target crypto sche
 **DO verify before committing a documentation change:**
 
 ```bash
-python memory/scripts/verify_memory.py
+python memory/scripts/verify_memory.py --strict
 ```
 
 It checks links, both indexes, and the markdown rules below.
+`--strict` matches what CI actually runs — a change that passes without it can still fail there.
+`--fix` reflows any one-sentence-per-line violations in place before you check.
 Structural problems fail the run; style problems warn unless you pass `--strict`.
 
 The full rule set is in [`../.markdownlint.jsonc`](../.markdownlint.jsonc), for editors and for `markdownlint-cli2` if Node is available (it already is, for `web-demo/`).
@@ -121,9 +123,12 @@ measured instead.
 **DO consider the blast radius.**
 After any change, ask which of the three sub-projects it affects, and re-run only those:
 
-1. `core/` — the real protocol implementation. Changes here can affect `web-demo/`'s TypeScript port (see [`coding-guidelines.md`](coding-guidelines.md)'s mirrored-implementation rule) and, eventually, `client/`'s Dart port once one exists.
-2. `web-demo/` — the standalone demo. Changes here are isolated; nothing downstream depends on it.
-3. `client/` — the Flutter app and its `medium` package. Isolated from `core/` and `web-demo/` today; no shared code exists yet.
+1. `core/` — the real protocol implementation.
+Changes here can affect `web-demo/`'s TypeScript port (see [`coding-guidelines.md`](coding-guidelines.md)'s mirrored-implementation rule) and, eventually, `client/`'s Dart port once one exists.
+2. `web-demo/` — the standalone demo.
+Changes here are isolated; nothing downstream depends on it.
+3. `client/` — the Flutter app and its `medium` package.
+Isolated from `core/` and `web-demo/` today; no shared code exists yet.
 
 **DO check whether a config knob has a code reader** before relying on it.
 None identified yet in this repo — no config knob here is currently known to be read by nothing.
@@ -144,4 +149,5 @@ Ask for the approved list to be extended when something you need is missing.
 The rule and the conventions are in [`automation-scripts.md`](automation-scripts.md).
 
 No secrets or environment-specific data exist in this repo yet — nothing here needs to be kept out
-of a commit for that reason. Revisit this section the first time one does.
+of a commit for that reason.
+Revisit this section the first time one does.

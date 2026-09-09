@@ -10,7 +10,8 @@ by message count, with the header/data key split worked out precisely in
 **Architecture:** A small, targeted extension to `envelope.dart` (the wire-format change: a header
 can optionally carry 32 bytes of rotation material, and which key encrypts the data portion can
 differ from which key encrypts the header) plus rotation logic added to `PeerSession` in
-`session.dart`. No new files — this plan only touches what already exists.
+`session.dart`.
+No new files — this plan only touches what already exists.
 
 **Tech Stack:** Same as prior plans — Dart 3, `package:cryptography`, `package:test`.
 
@@ -19,7 +20,8 @@ deliberately *not* envelope.dart's concern — `packMessage`/`Reassembler` only 
 already-computed key encrypts which part of the message. `packMessage`'s caller (Task 3 below)
 pre-computes the new key before calling it, since it has `material` in hand from the start;
 `Reassembler` computes it internally (Task 1), since it only learns `material` mid-parse, after
-decrypting the header. This mirrors an inherent asymmetry, not an arbitrary design choice — see
+decrypting the header.
+This mirrors an inherent asymmetry, not an arbitrary design choice — see
 crypto-summary.md §4.
 
 ## Global Constraints
@@ -33,11 +35,13 @@ crypto-summary.md §4.
 ## Task 1: Extend the envelope for rotation material
 
 **Files:**
+
 - Modify: `protocol/lib/src/envelope.dart`
 - Modify: `protocol/test/envelope_pack_test.dart`
 - Modify: `protocol/test/envelope_reassemble_test.dart`
 
 **Interfaces:**
+
 - Consumes: `deriveKey` (Task 2, `crypto.dart`) — newly needed by `Reassembler` to derive the
   rotated data key internally.
 - Produces (modifies existing signatures, additive so no existing caller breaks):
@@ -491,10 +495,12 @@ git commit -m "feat: add rotation-material support to the envelope"
 ## Task 2: PeerRecord rotation helpers
 
 **Files:**
+
 - Modify: `protocol/lib/src/peer.dart`
 - Modify: `protocol/test/peer_test.dart`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `bool get PeerRecord.outgoingRotationDue`, `bool get PeerRecord.incomingRotationDue` —
   pure computations from already-existing fields (protocol spec §6: "the message that reaches the
@@ -579,10 +585,12 @@ git commit -m "feat: add PeerRecord rotation-due checks"
 ## Task 3: Rotation on send
 
 **Files:**
+
 - Modify: `protocol/lib/src/session.dart`
 - Modify: `protocol/test/session_test.dart`
 
 **Interfaces:**
+
 - Consumes: `outgoingRotationDue` (Task 2, `peer.dart`); `randomBytes`, `deriveKey` (Task 2,
   `crypto.dart`); extended `packMessage` (Task 1, `envelope.dart`).
 - Produces: `PeerSession.sendData` (existing method from the handshake plan, behavior extended —
@@ -681,7 +689,8 @@ import 'package:cryptography/cryptography.dart';
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd protocol && dart test test/session_test.dart`
-Expected: PASS. Re-run the full suite too, since this changes `sendData`'s behavior for existing
+Expected: PASS.
+Re-run the full suite too, since this changes `sendData`'s behavior for existing
 callers: `cd protocol && dart test` — expected: PASS (the earlier "data sent after the handshake
 round-trips" test uses a `rotationInterval: 256` default, so it never rotates and is unaffected).
 
@@ -697,10 +706,12 @@ git commit -m "feat: trigger key rotation on send"
 ## Task 4: Rotation on receive
 
 **Files:**
+
 - Modify: `protocol/lib/src/session.dart`
 - Modify: `protocol/test/session_test.dart`
 
 **Interfaces:**
+
 - Consumes: `incomingRotationDue` (Task 2, `peer.dart`); extended `Reassembler` (Task 1,
   `envelope.dart`).
 - Produces: `PeerSession.receiveFragment` (existing method, behavior extended — same signature).
@@ -751,7 +762,8 @@ key, so the third message's header fails to parse against a fixed base-size assu
 - [ ] **Step 3: Write minimal implementation**
 
 In `protocol/lib/src/session.dart`, `_startReassembler` currently constructs a plain, non-rotation
-`Reassembler` for the data-key attempt. Replace that construction:
+`Reassembler` for the data-key attempt.
+Replace that construction:
 
 ```dart
       final dataReassembler = Reassembler(
@@ -765,7 +777,8 @@ In `protocol/lib/src/session.dart`, `_startReassembler` currently constructs a p
 ```
 
 The same block's completion branch (where a short, single-fragment message finishes reassembling
-immediately) currently just does `currentRecord.incomingCounter++;`. Replace it with logic that
+immediately) currently just does `currentRecord.incomingCounter++;`.
+Replace it with logic that
 also detects and applies a completed rotation, reading the resolved key straight off the
 reassembler (Task 1's `resolvedDataKey`) rather than re-deriving it:
 
@@ -791,7 +804,8 @@ reassembler (Task 1's `resolvedDataKey`) rather than re-deriving it:
 ```
 
 `_feedActive`'s non-bootstrap branch (the multi-fragment completion path) currently just does
-`currentRecord.incomingCounter++;` too. Apply the identical logic there:
+`currentRecord.incomingCounter++;` too.
+Apply the identical logic there:
 
 ```dart
     if (_activeReassemblerIsBootstrap) {
@@ -837,10 +851,12 @@ git commit -m "feat: rotate the incoming key on receive, completing protocol spe
 > task makes that check explicit rather than trusting it implicitly held from Tasks 3-4's code.
 
 **Files:**
+
 - Modify: `protocol/lib/src/peer.dart`
 - Test: `protocol/test/peer_test.dart`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: no new public API — this task audits and, if needed, fixes `PeerRecord`'s
   `outgoingKey`/`incomingKey` setters (Task 2 of the handshake plan) to guarantee the old
@@ -878,7 +894,8 @@ git commit -m "feat: rotate the incoming key on receive, completing protocol spe
 Run: `cd protocol && dart test test/peer_test.dart`
 Expected: PASS already — `PeerRecord`'s setters (handshake plan Task 2) directly overwrite
 `_keyMin2Max`/`_keyMax2Min` with no intermediate retained copy, and nothing else in `PeerRecord`
-holds a separate reference. This test exists to make that guarantee explicit and regression-tested,
+holds a separate reference.
+This test exists to make that guarantee explicit and regression-tested,
 not because Task 2's code needs changing — no implementation step follows.
 
 - [ ] **Step 3: Commit**
@@ -894,6 +911,7 @@ git commit -m "test: verify PeerRecord never retains a superseded key"
 
 - **Peer-record persistence** across app restarts, and **medium-interface.md as Dart abstract
   classes, and the Odnoklassniki wrapper** — the same follow-on slices flagged at the end of the
-  handshake plan, still unaffected by anything here. With this plan done, protocol spec §4–§6 are
+  handshake plan, still unaffected by anything here.
+With this plan done, protocol spec §4–§6 are
   now fully implemented (text-only, no image steganography) — the next natural step is wiring a
   real medium underneath, per the original session plan.

@@ -53,8 +53,8 @@ npx ng lint                     # angular-eslint@19, run in CI
 ## Checks
 
 ```bash
-python memory/scripts/verify_memory.py   # docs: links, indexes, markdown rules
-python memory/scripts/verify_memory.py --strict   # same, plus style warnings
+python memory/scripts/verify_memory.py --strict   # docs: links, indexes, markdown rules -- matches CI
+python memory/scripts/verify_memory.py --fix      # reflow one-sentence-per-line violations, then exit
 ```
 
 Full test suites (`poetry poe test`, `npx ng test --watch=false --browsers=ChromeHeadless`,
@@ -76,7 +76,8 @@ npx ng lint                                                    # from web-demo/
 
 - **`poetry poe test`'s example `poe demo`/`demo-handshake` invocations** (part of the CI `test`
   job) are smoke tests, not the test suite — a green run there proves the CLI entrypoint didn't
-  crash on a handful of hand-picked inputs, not that `pytest` passed. Both run in the same CI job;
+  crash on a handful of hand-picked inputs, not that `pytest` passed.
+Both run in the same CI job;
   check which one actually failed.
 - **`flutter pub get`/`dart pub get` silently rewriting `pubspec.lock`** against whatever
   Flutter/Dart SDK is installed locally is expected, not a sign something is broken — see this

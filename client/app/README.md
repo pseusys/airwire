@@ -9,7 +9,8 @@ and [`../../AGENTS.md`](../../AGENTS.md) for repo-wide orientation.
 
 This app authenticates against Odnoklassniki via `airwire_medium` (the `../medium` package) and
 sends/receives plain-text messages through it — real OAuth, real network calls, a real running
-Flutter Web app. What it does **not** do yet: any of the actual airwire protocol.
+Flutter Web app.
+What it does **not** do yet: any of the actual airwire protocol.
 Messages sent here are not encrypted, chunked, or disguised the way [`core/`](../../core/) already
 implements — this shell wires up authentication and a chat UI first, ahead of that integration.
 See [`../../TODO.md`](../../TODO.md) D6 for where that's tracked.

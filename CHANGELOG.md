@@ -34,13 +34,75 @@ Open work is in [`TODO.md`](TODO.md).
 ## Rotation
 
 This file covers the **current cycle only** — there have been no releases/tags yet, so it is not
-rotating on anything yet either. Revisit this section once a first release/tag exists, and rotate
+rotating on anything yet either.
+Revisit this section once a first release/tag exists, and rotate
 this file's entries into `memory/changelog-archive/CHANGELOG-v<X>.md` at that point, per the
 original template's rotation procedure (kept here for when it's needed): copy this header to the
 archived file, leave this file with the header and no entries, and note the rotation as the first
 entry of the new cycle.
 
 ---
+
+## 2026-09-09 — SMS/MMS transport reasoning moved out of `README.md` into a clearly-labeled idea in `memory/medium.md`
+
+*keywords: Transport Modes, SMS Size Budget, MMS Support, Pricing, Future medium idea*
+
+**Root `README.md` described web/SMS mode-switching, an SMS size budget, MMS-gated premium
+disguise tiers, and a free/premium pricing split as if they were current, tested product
+behavior — none of it is.** Testing right now happens entirely against a real messenger-backed
+medium (Odnoklassniki); SMS/MMS remains the product's original transport concept, not a parallel
+effort already in progress.
+
+**What changed in the code.**
+`README.md` lost its "Transport Modes," "SMS Size Budget," and "MMS Support (Premium)" sections and
+its "Pricing" section, and its "Message Format"/"Encryption" sections dropped their SMS-specific
+framing (`sender: phone number` → `sender: medium-specific — e.g. an OAuth-derived user ID`; the
+"Web Mode"/"SMS Mode" encryption split collapsed into one medium-agnostic "Encryption" section,
+since the crypto design itself — X25519, hyperslices, AEAD — never depended on which one).
+`memory/medium.md` gained a new "Future medium idea: SMS/MMS transport" section carrying that
+reasoning forward (mode switching, the 160-byte SMS budget that originally sized
+`DEFAULT_CHUNK_SIZE`, the MMS-gated-disguise-tier product idea), plus a new `SMS/MMS` row in its
+Providers table, both explicitly labeled as not built or tested. `memory/keywords.md` gained `SMS`,
+`MMS` triggers routing to it.
+
+**What it means, and what was decided.**
+The two disguise mechanisms (Markov text, image steganography) themselves were never actually
+MMS-specific — they're medium-agnostic `core/` features already documented in
+`memory/wire-protocol.md` — only the *pricing tier* that used to gate them was SMS/MMS-specific,
+and that gating doesn't exist in `core/` or `client/` today. `verify_memory.py` and
+`markdownlint-cli2` both stay clean.
+
+## 2026-09-09 — Full markdown reflow to one-sentence-per-line, `--strict` re-enabled in CI, closing TODO D11
+
+*keywords: sentence_breaks, fix_sentence_breaks, --fix, MD032, MD040, MD001, MD060*
+
+**234 "two sentences on one line" warnings across every markdown file in the repo, plus 55
+`markdownlint-cli2` findings in the 4 files previously excluded from CI, are both gone —
+`verify_memory.py --strict` and `markdownlint-cli2` are now both zero-issue, repo-wide.**
+
+**What changed in the code.**
+`memory/scripts/verify_memory.py` gained a `--fix` mode (`fix_sentence_breaks`): it reuses the
+exact same `sentence_breaks` detection `check_style` warns with, so a reflowed file is guaranteed
+to report zero violations afterward, rather than relying on a separately-written heuristic that
+could disagree with the checker.
+Ran it repo-wide (19 files touched), then
+`npx markdownlint-cli2 --fix` for the remaining findings (auto-fixed 52 of 55: all MD032
+blanks-around-lists, all MD060 table style), then fixed the last 3 by hand — one MD001
+heading-increment (a subtitle styled as an `### H3` directly under an `# H1`, with no `##` between,
+in `docs/research-proposal.md`; converted to a plain paragraph instead of a heading) and two MD040
+bare code fences (tagged `text`, since neither was real source code). `.markdownlintignore` and
+`.github/workflows/lint.yaml`'s `globs` no longer exclude `docs/superpowers/` or
+`docs/research-proposal.md`; the verify step runs `--strict`, matching what a contributor should
+run locally (`memory/dos-and-donts.md` updated to say so).
+
+**What it means, and what was decided.**
+Every file was spot-checked in the actual diff, not just trusted from a clean exit code — table
+rows were confirmed untouched (the checker's own `TABLE_ROW` guard), and the largest single diff
+(`docs/superpowers/specs/2026-08-27-messaging-protocol-design.md`, a 485-line technical spec) was
+read in full post-reflow to confirm no numbered list, link, or code span was corrupted by the split.
+`core/` (174 tests, lint), `client/app` (17 tests, analyze), `client/medium` (32 tests, analyze), and
+`web-demo/` (55 tests, lint) all still pass.
+TODO item D11 is closed.
 
 ## 2026-09-09 — `docs/superpowers/`'s shipped-feature specs and plans retired into `memory/`, closing TODO A8
 
@@ -60,10 +122,12 @@ alternatives that weren't recorded anywhere yet (period-based Markov sentence-bo
 reconstruction, two rejected approaches to Markov seed-gating, and the target spec's rejected
 certificate replay-detection). `memory/handshake.md`'s "Target spec" section gained the load-bearing
 facts the messaging-protocol-design.md draft has that it didn't yet (pair-specific `bootstrap_key`,
-key-selection-on-receive with no explicit message-type field). Found and fixed two more dangling
+key-selection-on-receive with no explicit message-type field).
+Found and fixed two more dangling
 `docs/superpowers/specs/...` links in `core/sources/markov.py`'s docstring (missed by the earlier
 A4 pass — outside what `verify_memory.py` scans, since it only checks `.md` files) and one stale
-comment in `web-demo/src/app/core/prng.ts`. Also surfaced and filed: `TODO.md` C1 (three OAuth/API
+comment in `web-demo/src/app/core/prng.ts`.
+Also surfaced and filed: `TODO.md` C1 (three OAuth/API
 assumptions from the now-deleted Odnoklassniki design spec that were never actually verified against
 the real API — `client_id` is still a literal placeholder in `client/app/lib/main.dart`), now also
 documented as known gaps in `memory/medium.md`.
@@ -85,7 +149,8 @@ and lint, all still pass.
 
 **`README.md`'s License section literally read `TODO!` — no license had ever been chosen.** Owner
 decided: proprietary, all rights reserved, no license file — stated explicitly in `README.md`
-rather than left as an unresolved placeholder. TODO item A6 is closed.
+rather than left as an unresolved placeholder.
+TODO item A6 is closed.
 
 ## 2026-09-09 — `client/app` and `client/medium` both get real READMEs, closing TODO A7
 
@@ -104,7 +169,8 @@ Both link to `../../memory/commands.md` and `../../.github/workflows/client.yml`
 
 **What it means, and what was decided.**
 `flutter analyze`/`dart analyze` both still clean, `verify_memory.py` 0 errors, full-repo
-`markdownlint-cli2` 0 issues (21 files, up from 20). TODO item A7 is closed.
+`markdownlint-cli2` 0 issues (21 files, up from 20).
+TODO item A7 is closed.
 
 ## 2026-09-09 — Full repo coding-guidelines review, closing TODO A3
 
@@ -118,14 +184,16 @@ silent rewrite.**
 **What changed in the code.**
 `core/sources/markov.py`'s `_load_model` had a function-local `import json` — plain stdlib, no
 justification for a lazy import — moved to the top of the file with the rest of the module's
-imports. Verified: `poetry poe lint` and `test_markov.py`'s 32 tests both still pass.
+imports.
+Verified: `poetry poe lint` and `test_markov.py`'s 32 tests both still pass.
 
 **What it means, and what was decided.**
 Two other function-local imports found (`scripts/model.py`'s `markovify`, `scripts/process.py`'s
 `grpc_tools`) turned out to be deliberate: both are optional, `devel`-extra-only dependencies,
 lazily imported so importing the module itself doesn't force the extra to be installed —
 `memory/coding-guidelines.md`'s Python section now documents this as an explicit exception rather
-than leaving the rule to look violated. Similarly, "test code lives in its own tree" didn't actually
+than leaving the rule to look violated.
+Similarly, "test code lives in its own tree" didn't actually
 describe `web-demo/`'s already-established, idiomatic-Angular co-located `*.spec.ts` convention —
 documented as the one deliberate exception instead of being "fixed" by moving working test files.
 The larger finding — `core/`'s most-explained modules (`markov.py`, `chunking.py`) narrate history
@@ -140,7 +208,8 @@ unwinding it is a real editing decision, not a mechanical fix.
 
 **Only `markov.ts` had a dedicated spec file; `arithmetic.ts`, `synthesis.ts`, `textures.ts`,
 `prng.ts`, and `png.ts` had none at all** — a regression in any of them previously surfaced only as
-a component-level test failure (if at all) or a manual browser check. All five now have real unit
+a component-level test failure (if at all) or a manual browser check.
+All five now have real unit
 tests, 42 new tests total, following `markov.spec.ts`'s established pattern (round-trip,
 determinism, seed/data-differs-across-runs).
 
@@ -159,7 +228,8 @@ just assumed from "PNG is lossless" in the abstract).
 
 **What it means, and what was decided.**
 55/55 tests pass (13 pre-existing + 42 new), full suite runs in ~2 seconds; `ng lint` reports zero
-issues on the new files. TODO item A5 is closed; see `TODO.md`'s "Completed and drained" table.
+issues on the new files.
+TODO item A5 is closed; see `TODO.md`'s "Completed and drained" table.
 
 ## 2026-09-09 — `client/` and `web-demo/` both get CI-enforced lint, closing TODO A1/A2
 
@@ -173,7 +243,8 @@ project's Angular 19, not the `@22` `ng add` installs by default) added via `ng 
 
 **What changed in the code.**
 `web-demo/eslint.config.js` (new), `web-demo/angular.json` (new `lint` architect target),
-`web-demo/package.json` (new `lint` script + devDependencies). Fixed the 3 pre-existing violations
+`web-demo/package.json` (new `lint` script + devDependencies).
+Fixed the 3 pre-existing violations
 `ng lint` immediately surfaced, all auto-fixable and behavior-preserving:
 `arithmetic.ts`'s `candidateRanges` now takes `readonly Candidate<T>[]` instead of
 `ReadonlyArray<Candidate<T>>` (style-only), and `textures.ts`'s `reactionDiffusion` declares its two
@@ -182,7 +253,8 @@ never-reassigned `Float64Array`s (`u`, `v`) with `const` instead of `let`.
 **What it means, and what was decided.**
 Both new CI jobs were verified locally before being trusted (`flutter analyze`/`dart analyze`/
 `flutter test`/`dart test` all pass; `ng lint` reports zero issues after the fixes above) — not just
-assumed to work from the workflow YAML alone. TODO items A1 and A2 are closed; see `TODO.md`'s
+assumed to work from the workflow YAML alone.
+TODO items A1 and A2 are closed; see `TODO.md`'s
 "Completed and drained" table.
 
 ## 2026-09-09 — `core/` source comments no longer point at the deleted `docs/design-decisions.md`
@@ -201,7 +273,8 @@ Fixed in `core/sources/{crypto,chunking,markov,handshake,synthesis}.py`,
 `docs/handshake.md` reference now points at `memory/handshake.md`; every `design decision #N`/
 `docs/design-decisions.md` reference now points at the specific place that content actually lives
 (`memory/wire-protocol.md`, `memory/rejected-ideas.md`'s relevant entry, or `TODO.md` D1/D2, depending
-on which). Also fixed, found by re-running `poetry poe lint` after these edits: a pre-existing mypy
+on which).
+Also fixed, found by re-running `poetry poe lint` after these edits: a pre-existing mypy
 failure in `core/tests/test_markov.py::test_finish_sentence_raises_when_no_path_to_end_exists` — a
 test-local `chain` dict inferred with fixed-arity `tuple[str, str]` keys, incompatible with
 `_finish_sentence`'s `Dict[Tuple[str, ...], ...]` parameter type; fixed with explicit
@@ -209,7 +282,9 @@ test-local `chain` dict inferred with fixed-arity `tuple[str, str]` keys, incomp
 
 **What it means, and what was decided.**
 `poetry poe lint` and the full `pytest` suite (174 tests) both pass clean after these changes — run,
-not assumed. TODO item A4 is closed; see `TODO.md`'s "Completed and drained" table. Source-code
+not assumed.
+TODO item A4 is closed; see `TODO.md`'s "Completed and drained" table.
+Source-code
 comments referencing `memory/`/`TODO.md` locations are exactly the kind of reference
 `verify_memory.py` cannot check (it only scans `.md` files) — worth remembering next time a `memory/`
 file gets renamed or retired.
@@ -238,7 +313,8 @@ untouched — referenced from `AGENTS.md`, not absorbed.
 `docs/` now holds only the airwave research track and the superpowers skill's own design/plan
 archive; everything else the previous `docs/` held is either in `memory/` (how things work now,
 grown only as earned — see `memory/README.md`'s growth table) or in `TODO.md`/`CHANGELOG.md`
-(what's open, what happened). Two real tooling gaps surfaced during the migration and were filed
+(what's open, what happened).
+Two real tooling gaps surfaced during the migration and were filed
 in `TODO.md` §A rather than fixed silently: `web-demo/` has no linter configured at all, and no CI
 runs `client/`'s tests.
 
@@ -268,7 +344,8 @@ needed before.
 **What it means, and what was decided.**
 The design doc's error-handling section was corrected in place rather than left wrong: both outcomes
 (corrupted bytes, or this `ValueError`) are documented as acceptable evidence of "did not recover the
-original data," and both are exercised in the test suite. No behavior change was needed to
+original data," and both are exercised in the test suite.
+No behavior change was needed to
 `MarkovModelError` or decode's existing tamper-detection `ValueError` cases — this is the same
 exception, hit via a new path.
 
@@ -288,7 +365,8 @@ Verified by running the full suite on the refreshed lockfile: 17/17 `client/app`
 (`flutter test`) and 32/32 `client/medium` tests (`dart test`) pass.
 
 **What it means, and what was decided.**
-Committed as routine maintenance. See `memory/commands.md`'s "Commands whose output is easy to
+Committed as routine maintenance.
+See `memory/commands.md`'s "Commands whose output is easy to
 misread" section — this exact diff shape (a large, unexplained lockfile jump with no
 `pubspec.yaml` change) is expected the first time `pub get` runs against a newer locally-installed
 SDK, not a sign something broke.
@@ -305,7 +383,8 @@ implemented and wired into the wire protocol**, closing out `docs/roadmap.md`'s 
 `core/sources/synthesis.py`/`textures.py`: patch-based reversible texture synthesis, four flavors
 (`SYNTHESIS_VALUE_NOISE`/`VORONOI`/`REACTION_DIFFUSION`/`ATTRACTOR`), each its own `ChunkEncoding`
 yielding one PNG atom per hyperslice. `core/sources/handshake.py`: TOFU certificate exchange, session
-key via ECDH, per-sender disguise choice derived from `sender_id` alone. As a side effect, every
+key via ECDH, per-sender disguise choice derived from `sender_id` alone.
+As a side effect, every
 disguise variant (Markov language or texture flavor) now has its own wire identifier, resolving the
 earlier limitation where only `MARKOV_ENG` was auto-detected by `unpack_hyperchunk` (`MARKOV_RUS`
 packed-then-unpacked reliably failed before this).
@@ -322,7 +401,8 @@ on) remains explicitly out of scope for Phase 0.
 
 **Odnoklassniki was chosen over MAX, VKontakte, Yandex Messenger, Telegram, ICQ and TamTam as the
 first medium to implement**, and a working prototype now exists in `client/medium/` and
-`client/app/`. It's the only evaluated platform offering OAuth-delegated, real-user-scoped messaging
+`client/app/`.
+It's the only evaluated platform offering OAuth-delegated, real-user-scoped messaging
 (`graph.user.messages`) without a Terms-of-Service conflict.
 
 **What changed in the code.**
@@ -347,13 +427,15 @@ that the original per-chunk design never had.
 `core/sources/chunking.py`: `pack_hyperchunk`/`send_hyperchunk` now encrypt one hyperslice as a
 single AEAD operation and split the ciphertext into low-overhead chunks (a plain sequence number, no
 per-chunk crypto); one `HyperchunkHeader` message per hyperslice carries the nonce/tag/chunk-count
-needed to reassemble. A further iteration encrypted the header and ack as whole Protobuf messages
+needed to reassemble.
+A further iteration encrypted the header and ack as whole Protobuf messages
 (`hyperchunk.proto`) rather than leaving them in cleartext, buying metadata confidentiality and
 uniform tamper handling for one `hyperchunk_id`-tagged header.
 
 **What it means, and what was decided.**
 See `memory/wire-protocol.md` for the current lifecycle and `memory/rejected-ideas.md` for the
-header/ack nonce-derivation idea that was tried on top of this and partially reverted. Header, ack,
+header/ack nonce-derivation idea that was tried on top of this and partially reverted.
+Header, ack,
 and data currently share one symmetric key, distinguished only by nonce — accepted as a
 simplification, not revisited since (a domain-separated key per message class would need session
 setup machinery this module doesn't own).
@@ -379,5 +461,6 @@ arithmetic, no floating point anywhere in the encode/decode path), `core/sources
 
 **What it means, and what was decided.**
 `ChunkEncoding.encoding` is recorded in the (already-encrypted) `HyperchunkHeader`, costing nothing
-extra in metadata confidentiality. See `memory/wire-protocol.md`'s Components section for how this
+extra in metadata confidentiality.
+See `memory/wire-protocol.md`'s Components section for how this
 piece fits the rest of the pipeline.

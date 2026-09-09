@@ -20,7 +20,8 @@ Read what this task makes relevant, before acting rather than after:
 This project uses the **superpowers** skill set for feature-sized work, not an inline routine:
 brainstorm the design (hard gate — no code until a design is presented and approved) → write an
 implementation plan → execute it task by task → finish the branch (verify tests, then merge / PR /
-keep-as-is, the owner's call). Invoke those skills directly rather than improvising an equivalent
+keep-as-is, the owner's call).
+Invoke those skills directly rather than improvising an equivalent
 routine; keeping one routine in one place is the point.
 
 Documentation is updated in the same step as the change, not after.
@@ -35,9 +36,17 @@ Documentation is updated in the same step as the change, not after.
 
 **Three independent sub-projects, no shared build step:**
 
-- **`core/`** — the real Python protocol implementation. Working directory: `core/`. Runtime: Python 3.11+/3.12 via Poetry, local `.venv`. No secrets.
-- **`client/`** — a Dart pub workspace (`client/app`: Flutter Web; `client/medium`: pure Dart). Working directory: `client/app/` or `client/medium/` respectively. Runtime: Dart ≥3.6.0, Flutter pinned to a specific `stable` revision (`client/app/.metadata`). No secrets currently — OAuth tokens are handled entirely client-side via Hive, nothing is committed.
-- **`web-demo/`** — a standalone Angular 19 demo of the disguise mechanism only (no encryption, no chunking, no handshake). Working directory: `web-demo/`. Runtime: Node 22 + npm.
+- **`core/`** — the real Python protocol implementation.
+Working directory: `core/`.
+Runtime: Python 3.11+/3.12 via Poetry, local `.venv`.
+No secrets.
+- **`client/`** — a Dart pub workspace (`client/app`: Flutter Web; `client/medium`: pure Dart).
+Working directory: `client/app/` or `client/medium/` respectively.
+Runtime: Dart ≥3.6.0, Flutter pinned to a specific `stable` revision (`client/app/.metadata`).
+No secrets currently — OAuth tokens are handled entirely client-side via Hive, nothing is committed.
+- **`web-demo/`** — a standalone Angular 19 demo of the disguise mechanism only (no encryption, no chunking, no handshake).
+Working directory: `web-demo/`.
+Runtime: Node 22 + npm.
 
 No secrets exist anywhere in this repo yet — nothing to bootstrap.
 
@@ -88,8 +97,12 @@ airwire/
 
 1. **Prefer editing over adding**; no premature abstraction, no defensive padding, no compatibility shims.
 2. **Long narrative goes in `memory/`**, not in a docstring or in this file.
-3. **`docs/crypto-summary.md`'s rotation/directional-key crypto scheme is a target spec, not what `core/` implements.** Read `core/sources/crypto.py`/`chunking.py`/`handshake.py` for current behavior; see [`memory/handshake.md`](memory/handshake.md) for both, clearly separated. Treating the spec as deployed reality produces confidently wrong analysis.
-4. **Run the test before trusting a claim about failure behavior**, especially "this can't happen" claims about something not yet implemented. The seed-gating design for the Markov text disguise assumed decoding with the wrong seed could only ever return corrupted bytes, never raise — reasoned from the code, not verified. Running the actual test immediately falsified it. See `CHANGELOG.md`'s entry on it.
+3. **`docs/crypto-summary.md`'s rotation/directional-key crypto scheme is a target spec, not what `core/` implements.** Read `core/sources/crypto.py`/`chunking.py`/`handshake.py` for current behavior; see [`memory/handshake.md`](memory/handshake.md) for both, clearly separated.
+Treating the spec as deployed reality produces confidently wrong analysis.
+4. **Run the test before trusting a claim about failure behavior**, especially "this can't happen" claims about something not yet implemented.
+The seed-gating design for the Markov text disguise assumed decoding with the wrong seed could only ever return corrupted bytes, never raise — reasoned from the code, not verified.
+Running the actual test immediately falsified it.
+See `CHANGELOG.md`'s entry on it.
 
 Full versions of these: [`memory/dos-and-donts.md`](memory/dos-and-donts.md).
 
