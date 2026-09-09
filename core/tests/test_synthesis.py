@@ -12,7 +12,7 @@ SAMPLES = [b"", b"\x00", b"\xff", token_bytes(1), token_bytes(20), token_bytes(1
 
 @pytest.fixture(scope="module")
 def texture() -> np.ndarray:
-    return value_noise(64, seed=1)
+    return value_noise(synthesis.DEFAULT_TEXTURE_SIZE, seed=1)
 
 
 @pytest.mark.parametrize("data", SAMPLES)
@@ -104,6 +104,45 @@ def test_image_encoding_round_trip(data: bytes) -> None:
     assert len(atoms) == 1, "ImageEncoding should yield exactly one atom -- the whole image."
     recovered = synthesis.SYNTHESIS_VALUE_NOISE.decode(atoms[0], len(data), nonce)
     assert recovered == data
+
+
+@pytest.mark.parametrize(
+    "encoding",
+    [
+        synthesis.SYNTHESIS_VALUE_NOISE,
+        synthesis.SYNTHESIS_VORONOI,
+        synthesis.SYNTHESIS_REACTION_DIFFUSION,
+        synthesis.SYNTHESIS_ATTRACTOR,
+    ],
+    ids=lambda encoding: encoding.flavor,
+)
+@pytest.mark.parametrize("data", SAMPLES)
+def test_image_encoding_round_trip_every_flavor(encoding: synthesis.ImageEncoding, data: bytes) -> None:
+    nonce = token_bytes(24)
+    atom = next(encoding.encode_atoms(data, nonce))
+    assert encoding.decode(atom, len(data), nonce) == data
+
+
+@pytest.mark.parametrize(
+    "encoding",
+    [
+        synthesis.SYNTHESIS_VALUE_NOISE,
+        synthesis.SYNTHESIS_VORONOI,
+        synthesis.SYNTHESIS_REACTION_DIFFUSION,
+        synthesis.SYNTHESIS_ATTRACTOR,
+    ],
+    ids=lambda encoding: encoding.flavor,
+)
+def test_image_encoding_round_trip_past_one_texture_period(encoding: synthesis.ImageEncoding) -> None:
+    """A payload large enough that the canvas grows taller than one texture period, so
+    `_guide_patch`'s modulo wraparound actually gets exercised (not just position 0..15)."""
+
+    data = token_bytes(2_000)
+    nonce = token_bytes(24)
+    atom = next(encoding.encode_atoms(data, nonce))
+    canvas = synthesis._png_to_canvas(atom)
+    assert canvas.shape[0] // synthesis.DEFAULT_PATCH_SIZE > synthesis.DEFAULT_TEXTURE_SIZE // synthesis.DEFAULT_PATCH_SIZE
+    assert encoding.decode(atom, len(data), nonce) == data
 
 
 def test_image_encoding_atom_is_a_valid_png() -> None:

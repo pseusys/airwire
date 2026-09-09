@@ -121,6 +121,20 @@ Patch-based reversible
 The source texture's seed is derived
   from the hyperslice's own nonce — real per-message variety at zero extra wire cost, safe because
   texture choice needs no confidentiality of its own.
+Every canvas row (seed or gap) maps onto a
+  real row of the source texture via `row % texture_height_in_patches` (`_guide_patch`), which
+  requires the texture to be exactly `canvas_width` patches wide (`DEFAULT_TEXTURE_SIZE =
+  DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE`) and, for canvases taller than one texture, requires
+  the texture to tile seamlessly — true by construction for `reaction_diffusion` (its Laplacian is
+  already toroidal), added deliberately for `value_noise` and `voronoi` (periodic grid/distance
+  wrapping).
+For three of the four flavors (`position_guided=True` on `ImageEncoding`), gap-row
+  candidates are scored against the texture's true content at that exact position, not just
+  against their immediate neighbors — `attractor` has no exploitable 2-D positional structure (a
+  sparse chaotic-orbit density histogram, not a spatially periodic field) and keeps the original
+  edge-only scoring instead.
+See the 2026-09-09 entry in [`../CHANGELOG.md`](../CHANGELOG.md) for
+  the before/after measurements.
 - **`core/sources/handshake.py`** — see [`handshake.md`](handshake.md).
 
 ## Tunables
@@ -133,7 +147,7 @@ The source texture's seed is derived
 | `MIN_CHUNK_ID_SIZE` / `MAX_CHUNK_ID_SIZE` | 1 / 8 | `chunking.py` | Byte-width range for the per-hyperchunk chunk sequence number; grows only as far as the actual chunk count needs. |
 | `DEFAULT_MAX_RETRIES` | 3 | `chunking.py` | Whole-hyperchunk resend attempts before `HyperchunkDeliveryError`. |
 | `HEADER_PLAINTEXT_SIZE` | 96 | `chunking.py` | Fixed padded size a serialized header is grown to before an optional header disguise, so disguised length never needs to be self-describing. |
-| `DEFAULT_TEXTURE_SIZE` | 64 | `synthesis.py` | Source texture's edge length in patches, before canvas synthesis. |
+| `DEFAULT_TEXTURE_SIZE` | 128 | `synthesis.py` | Source texture's edge length in pixels; must equal `DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE`. |
 | `DEFAULT_PATCH_SIZE` | 8 | `synthesis.py` | Edge length, in pixels, of one texture patch. |
 | `DEFAULT_CANVAS_WIDTH` | 16 | `synthesis.py` | Synthesized canvas width, in patches. |
 | `_FILLER_SEED_SIZE` | 4 | `markov.py` | Byte size of every derived Markov filler/permutation seed. |

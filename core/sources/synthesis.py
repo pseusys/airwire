@@ -16,27 +16,33 @@ design-decisions.md for the full story of why):
   "codebook" (see `sources/textures.py`) that both ends already have, so that whole recovery
   mechanism -- and the index-table bookkeeping it needs -- is simply not needed and isn't built.
 
-How embedding works: each **gap row** cell is filled by ranking every patch in the source
-texture's patch library by how well its edges would blend with its neighbors -- the seed rows
-immediately above and below (always known, since seed-row content is a fixed function of position,
-not of anything already placed) and the already-chosen gap patch to its left, if any. Match quality
-(sum of squared pixel differences on the shared edges) becomes an integer weight -- exact
-integer arithmetic throughout, never floating point, for the same reason `sources/markov.py`
-avoids it: the arithmetic coder needs bit-exact agreement between encode and decode on any device.
-The arithmetic coder then picks which patch to place the same way it picks words in the text
-case: secret bits select among the weighted candidates, not "the best match."
+Every row of the canvas, seed or gap, corresponds to a real row of one continuous, periodic
+source texture (`row % texture_height_in_patches`, see `_guide_patch`) -- not to an arbitrary
+placeholder. Seed rows render that row's true content exactly. For three of the four texture
+flavors (`position_guided=True` -- everything except `attractor`), each **gap row** cell is filled
+by ranking every patch in the source texture's patch library by how close it is to the *true*
+patch this same periodic texture holds at that exact position, plus its left edge against the
+already-chosen gap patch to its left, if any -- so a gap patch is always pulled toward the real
+image that would be there anyway, which is what lets large-scale structure (a Voronoi cell, a
+reaction-diffusion tube) survive across a whole row, not just at one edge. `attractor` has no
+exploitable 2-D positional structure (confirmed by direct tiling tests -- see
+`memory/rejected-ideas.md`), so it keeps the original scheme instead: ranking by edge match against
+the seed rows immediately above and below, plus the left neighbor. Match quality (sum of squared
+pixel differences) becomes an integer weight -- exact integer arithmetic throughout, never floating
+point, for the same reason `sources/markov.py` avoids it: the arithmetic coder needs bit-exact
+agreement between encode and decode on any device. The arithmetic coder then picks which patch to
+place the same way it picks words in the text case: secret bits select among the weighted
+candidates, not "the best match."
 
 Known limitations, worth a second look independently of this module:
 
 - The regular seed/gap row layout is a visible artifact once you know to look for it (every other
   row is literally untouched source texture). Wu & Wang's irregular scatter hides this better but
   is substantially more complex to implement; not attempted here.
-- Large-scale, long-range structure (e.g. a Voronoi diagram's big flat cells, a reaction-diffusion
-  pattern's continuous tubes) does not survive synthesis well, because the blend cost function is
-  purely local (immediate edge pixels only) and gap rows are only one patch tall -- there's no
-  mechanism to keep a multi-patch-wide feature coherent across a gap row. Locally-stationary
-  textures (value noise) hold up much better. A future iteration could widen the comparison beyond
-  a single edge, or shrink gap rows relative to seed rows, rather than changing the coder itself.
+- `attractor`'s gap rows are still purely local (immediate edge pixels only), so its large-scale
+  behavior is unchanged from the original design -- it was already adequate under the local-only
+  cost function, unlike `voronoi`/`reaction_diffusion`, which is why it wasn't included in the
+  position-guided mechanism rather than needing a fallback for a regression.
 """
 
 import base64
@@ -54,7 +60,10 @@ from sources.textures import texture_by_name
 
 DEFAULT_PATCH_SIZE = 8
 DEFAULT_CANVAS_WIDTH = 16
-DEFAULT_TEXTURE_SIZE = 64
+# Must equal DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE: the source texture has to be exactly as
+# wide, in patches, as the canvas, or _guide_patch's row/col lookup stops corresponding to a real
+# position in the texture (see memory/wire-protocol.md and memory/rejected-ideas.md).
+DEFAULT_TEXTURE_SIZE = DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE
 
 
 class PatchLibrary:
@@ -91,12 +100,16 @@ class PatchLibrary:
             raise ValueError("Patch doesn't match any entry in this source texture's patch library!") from None
 
 
-def _seed_index(seed_ordinal: int, col: int, canvas_width: int, library_size: int) -> int:
-    return (seed_ordinal * canvas_width + col) % library_size
+def _guide_patch(texture: np.ndarray, row: int, col: int, patch_size: int) -> np.ndarray:
+    """The literal patch this (periodic) texture holds at canvas position (row, col) -- used to
+    render every seed row exactly (real content, no bits consumed) and, for the three
+    position-guided flavors, as the ground truth gap-row candidates are scored against. Wraps
+    modulo the texture's own patch grid, so it's well-defined for a canvas of any height, even
+    past one full texture period (see memory/wire-protocol.md)."""
 
-
-def _seed_patch(library: PatchLibrary, seed_ordinal: int, col: int, canvas_width: int) -> np.ndarray:
-    return library.patches[_seed_index(seed_ordinal, col, canvas_width, len(library))]
+    rows_per_period = texture.shape[0] // patch_size
+    cols_per_period = texture.shape[1] // patch_size
+    return _extract_patch(texture, row % rows_per_period, col % cols_per_period, patch_size)
 
 
 def _edge_cost(a: np.ndarray, b: np.ndarray) -> int:
@@ -104,24 +117,39 @@ def _edge_cost(a: np.ndarray, b: np.ndarray) -> int:
     return int(np.sum(diff * diff))
 
 
-def _candidate_weights(library: PatchLibrary, gap_row: List[np.ndarray], row: int, col: int, canvas_width: int) -> List[Tuple[int, int]]:
-    """Weight every library patch by how well it would blend into gap-row position (row, col):
-    its top/bottom edges against the seed rows above and below (always known -- seed content is a
-    fixed function of position, never of anything already placed) and its left edge against the
-    already-chosen gap patch to its left, if any. Comparing a wider overlap region instead of just
-    the touching row of pixels was tried and measurably made this worse, not better -- see
-    memory/rejected-ideas.md's OVERLAP entry for the measurements and the reasoning for why."""
+def _candidate_weights(library: PatchLibrary, gap_row: List[np.ndarray], texture: np.ndarray, row: int, col: int, position_guided: bool) -> List[Tuple[int, int]]:
+    """Weight every library patch by how well it would fill gap-row position (row, col), plus its
+    left edge against the already-chosen gap patch to its left, if any (comparing a wider overlap
+    region instead of just the touching row of pixels was tried and measurably made this worse,
+    not better -- see memory/rejected-ideas.md's OVERLAP entry).
 
-    above = _seed_patch(library, (row - 1) // 2, col, canvas_width)
-    below = _seed_patch(library, (row + 1) // 2, col, canvas_width)
+    Position-guided flavors (`position_guided=True`) score the *whole patch* against the true
+    content this periodic texture holds at exactly this position -- always known, since it's a
+    pure function of position and the shared seed, not of anything already placed -- which is what
+    lets large-scale structure (a Voronoi cell, a reaction-diffusion tube) survive: every gap
+    patch is pulled toward the real image that would be there anyway, not just towards agreeing
+    with its immediate neighbors. The one flavor without exploitable positional structure
+    (`attractor`) keeps the original, purely local edge-vs-neighboring-seed-rows cost instead."""
+
     left = gap_row[col - 1] if col > 0 else None
+    patch_size = library.patch_size
 
     costs = []
-    for patch in library.patches:
-        cost = _edge_cost(patch[0, :, :], above[-1, :, :]) + _edge_cost(patch[-1, :, :], below[0, :, :])
-        if left is not None:
-            cost += _edge_cost(patch[:, 0, :], left[:, -1, :])
-        costs.append(cost)
+    if position_guided:
+        target = _guide_patch(texture, row, col, patch_size)
+        for patch in library.patches:
+            cost = _edge_cost(patch, target)
+            if left is not None:
+                cost += _edge_cost(patch[:, 0, :], left[:, -1, :])
+            costs.append(cost)
+    else:
+        above = _guide_patch(texture, row - 1, col, patch_size)
+        below = _guide_patch(texture, row + 1, col, patch_size)
+        for patch in library.patches:
+            cost = _edge_cost(patch[0, :, :], above[-1, :, :]) + _edge_cost(patch[-1, :, :], below[0, :, :])
+            if left is not None:
+                cost += _edge_cost(patch[:, 0, :], left[:, -1, :])
+            costs.append(cost)
 
     max_cost = max(costs)
     return [(index, (max_cost - cost) + 1) for index, cost in enumerate(costs)]
@@ -137,22 +165,24 @@ def _extract_patch(canvas: np.ndarray, row: int, col: int, patch_size: int) -> n
     return canvas[r0 : r0 + patch_size, c0 : c0 + patch_size]
 
 
-def encode(data: bytes, texture: np.ndarray, patch_size: int = DEFAULT_PATCH_SIZE, canvas_width: int = DEFAULT_CANVAS_WIDTH) -> np.ndarray:
+def encode(data: bytes, texture: np.ndarray, patch_size: int = DEFAULT_PATCH_SIZE, canvas_width: int = DEFAULT_CANVAS_WIDTH, position_guided: bool = True) -> np.ndarray:
     """Encrypt-then-call: `data` should already be ciphertext. Returns the synthesized canvas as
     an `(H, W, 3)` `uint8` array -- a seed row, then alternating gap/seed row pairs until `data`
     is fully consumed, padded out to a full row with best-match (non-bit-consuming) filler if it
-    runs out mid-row, so the result is always rectangular."""
+    runs out mid-row, so the result is always rectangular. `canvas_width` must equal
+    `texture.shape[1] // patch_size`, or seed rows stop corresponding to real texture positions
+    (see `DEFAULT_TEXTURE_SIZE`'s docstring)."""
 
     library = PatchLibrary(texture, patch_size)
     cursor = BitCursor(data)
-    rows: List[List[np.ndarray]] = [[_seed_patch(library, 0, col, canvas_width) for col in range(canvas_width)]]
+    rows: List[List[np.ndarray]] = [[_guide_patch(texture, 0, col, patch_size) for col in range(canvas_width)]]
     low, high, width = 0, 1, 1
-    seed_ordinal, row_index = 1, 1
+    row_index = 1
 
     while cursor.remaining() > 0:
         gap_row: List[np.ndarray] = []
         for col in range(canvas_width):
-            candidates = _candidate_weights(library, gap_row, row_index, col, canvas_width)
+            candidates = _candidate_weights(library, gap_row, texture, row_index, col, position_guided)
             if cursor.remaining() <= 0:
                 best_index = max(candidates, key=lambda iw: iw[1])[0]
                 gap_row.append(library.patches[best_index])
@@ -170,14 +200,13 @@ def encode(data: bytes, texture: np.ndarray, patch_size: int = DEFAULT_PATCH_SIZ
                 low, high, width = strip_top_bits(low, high, width, common)
 
         rows.append(gap_row)
-        rows.append([_seed_patch(library, seed_ordinal, col, canvas_width) for col in range(canvas_width)])
-        seed_ordinal += 1
+        rows.append([_guide_patch(texture, row_index + 1, col, patch_size) for col in range(canvas_width)])
         row_index += 2
 
     return _rows_to_canvas(rows)
 
 
-def decode(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int = DEFAULT_PATCH_SIZE) -> bytes:
+def decode(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int = DEFAULT_PATCH_SIZE, position_guided: bool = True) -> bytes:
     """Invert `encode`: recover exactly `length` bytes from a synthesized canvas."""
 
     library = PatchLibrary(texture, patch_size)
@@ -196,7 +225,7 @@ def decode(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int
                 gap_row.append(patch)
                 continue
 
-            candidates = _candidate_weights(library, gap_row, row_index, col, canvas_width)
+            candidates = _candidate_weights(library, gap_row, texture, row_index, col, position_guided)
             ranges, low, high, width = candidate_ranges(low, high, width, candidates, accumulator.remaining())
             actual_index = library.index_of(patch)
             match: Optional[Tuple[int, int]] = next(((lo, hi) for i, lo, hi in ranges if i == actual_index), None)
@@ -287,24 +316,28 @@ class ImageEncoding(ChunkEncoding):
     or single-purpose, only unique -- which it already is.
     """
 
-    def __init__(self, flavor: str, identifier: hyperchunk_pb2.ChunkEncoding) -> None:
+    def __init__(self, flavor: str, identifier: hyperchunk_pb2.ChunkEncoding, position_guided: bool = True) -> None:
         self.flavor = flavor
         self.identifier = identifier
+        self.position_guided = position_guided
 
     def encode_atoms(self, data: bytes, nonce: bytes) -> Iterator[bytes]:
         seed = int.from_bytes(nonce[:4], "big")
         texture = texture_by_name(self.flavor, size=DEFAULT_TEXTURE_SIZE, seed=seed)
-        canvas = encode(data, texture)
+        canvas = encode(data, texture, position_guided=self.position_guided)
         yield _canvas_to_png(canvas)
 
     def decode(self, encoded: bytes, length: int, nonce: bytes) -> bytes:
         seed = int.from_bytes(nonce[:4], "big")
         texture = texture_by_name(self.flavor, size=DEFAULT_TEXTURE_SIZE, seed=seed)
         canvas = _png_to_canvas(encoded)
-        return decode(canvas, texture, length)
+        return decode(canvas, texture, length, position_guided=self.position_guided)
 
 
 SYNTHESIS_VALUE_NOISE = ImageEncoding("value_noise", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_VALUE_NOISE)
 SYNTHESIS_VORONOI = ImageEncoding("voronoi", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_VORONOI)
 SYNTHESIS_REACTION_DIFFUSION = ImageEncoding("reaction_diffusion", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_REACTION_DIFFUSION)
-SYNTHESIS_ATTRACTOR = ImageEncoding("attractor", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_ATTRACTOR)
+# attractor has no exploitable 2-D positional structure (a sparse density histogram of a chaotic
+# orbit, not a spatially-generated field -- confirmed by direct tiling tests, see
+# memory/rejected-ideas.md): it keeps the original local-edge-only cost function.
+SYNTHESIS_ATTRACTOR = ImageEncoding("attractor", hyperchunk_pb2.ChunkEncoding.SYNTHESIS_ATTRACTOR, position_guided=False)

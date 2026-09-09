@@ -24,28 +24,36 @@ Generator = Callable[[int, int], np.ndarray]
 
 
 def value_noise(size: int, seed: int, cell: int = 8) -> np.ndarray:
-    """Bilinear-upsampled random grid -- smooth, organic-looking, cloud-like blobs."""
+    """Bilinear-upsampled random grid -- smooth, organic-looking, cloud-like blobs. Wraps its
+    coarse grid modulo its own size (a torus, not a padded plane), so the result tiles
+    seamlessly -- needed to extend a fixed-size texture across a canvas taller than itself
+    without a visible seam at the join (see memory/wire-protocol.md)."""
 
     rng = np.random.default_rng(seed)
-    grid_size = size // cell + 2
+    grid_size = size // cell
     grid = rng.integers(0, 256, size=(grid_size, grid_size, 3)).astype(np.float64)
 
     out = np.zeros((size, size, 3), dtype=np.float64)
     for y in range(size):
         gy = y / cell
         y0, fy = int(gy), gy - int(gy)
+        y1 = (y0 + 1) % grid_size
         for x in range(size):
             gx = x / cell
             x0, fx = int(gx), gx - int(gx)
-            top = grid[y0, x0] * (1 - fx) + grid[y0, x0 + 1] * fx
-            bot = grid[y0 + 1, x0] * (1 - fx) + grid[y0 + 1, x0 + 1] * fx
+            x1 = (x0 + 1) % grid_size
+            top = grid[y0, x0] * (1 - fx) + grid[y0, x1] * fx
+            bot = grid[y1, x0] * (1 - fx) + grid[y1, x1] * fx
             out[y, x] = top * (1 - fy) + bot * fy
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
 def voronoi(size: int, seed: int, n_cells: int = 40) -> np.ndarray:
     """Cellular partitioning into flat-ish colored regions, shaded by distance to each cell's
-    seed point so interiors aren't perfectly flat (also avoids duplicate patches within a cell)."""
+    seed point so interiors aren't perfectly flat (also avoids duplicate patches within a cell).
+    Distance is toroidal (wrapped) -- computed against all 9 periodic images of each cell point,
+    not just its raw coordinates -- so cell borders never mismatch at a tile join (see
+    memory/wire-protocol.md)."""
 
     rng = np.random.default_rng(seed)
     points = rng.integers(0, size, size=(n_cells, 2))
@@ -53,7 +61,13 @@ def voronoi(size: int, seed: int, n_cells: int = 40) -> np.ndarray:
 
     yy, xx = np.mgrid[0:size, 0:size]
     coords = np.stack([yy, xx], axis=-1).reshape(-1, 1, 2)
-    dists = np.sum((coords - points[None, :, :]) ** 2, axis=-1)
+
+    offsets = np.array([(oy, ox) for oy in (-size, 0, size) for ox in (-size, 0, size)])
+    dists = np.sum((coords - (points[None, :, :] + offsets[0])) ** 2, axis=-1)
+    for offset in offsets[1:]:
+        candidate = np.sum((coords - (points[None, :, :] + offset)) ** 2, axis=-1)
+        dists = np.minimum(dists, candidate)
+
     nearest = np.argmin(dists, axis=-1)
     nearest_dist = np.sqrt(np.min(dists, axis=-1)).reshape(size, size)
 

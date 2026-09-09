@@ -43,6 +43,80 @@ entry of the new cycle.
 
 ---
 
+## 2026-09-09 — Image disguise scores gap-row patches against the texture's true content, closing TODO D13 and superseding D3
+
+*keywords: _guide_patch, position_guided, DEFAULT_TEXTURE_SIZE, seam MSE, toroidal Voronoi, periodic value_noise*
+
+**Investigating D13 ("generate a whole, visually uniform image") surfaced a real alignment bug, not
+just the already-known local-blend limitation: `DEFAULT_TEXTURE_SIZE=64` with `DEFAULT_CANVAS_WIDTH=16`
+patches meant the source texture was only half as wide as the canvas, so every seed row silently
+concatenated two unrelated texture rows side by side — confirmed visually as a sharp vertical seam
+down the middle of every row, seed rows included.**
+
+**What changed in the code.**
+`DEFAULT_TEXTURE_SIZE` is now `DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE` (128, not 64).
+`sources/synthesis.py`'s `_seed_index`/`_seed_patch` (flat, modulo-over-deduped-library indexing)
+are gone, replaced by `_guide_patch`: every canvas row, seed or gap, maps onto a real row of the
+source texture via `row % texture_height_in_patches`, wrapping so a canvas of any height stays
+well-defined past one texture period.
+That wrap needed the texture itself to tile seamlessly:
+`reaction_diffusion` already did (its Laplacian is toroidal by construction); `voronoi` now computes
+nearest-cell distance against all 9 periodic images of each cell point; `value_noise` now indexes
+its coarse grid modulo its own size instead of padding it.
+`_candidate_weights` gained a
+`position_guided` flag: when true (`value_noise`, `voronoi`, `reaction_diffusion`), gap-row
+candidates are scored against the *true* patch the texture holds at that exact position, not just
+against neighboring seed-row edges; `attractor` (`position_guided=False`) keeps the original
+edge-only scoring, since direct 2x2-tile testing showed it has no exploitable 2-D positional
+structure to compare against (a sparse chaotic-orbit density histogram, not a spatially periodic
+field).
+
+**What was measured** (same seam-MSE method the `OVERLAP` experiment used, plus a new "guide
+fidelity" metric — mean squared difference between what was actually placed and the texture's true
+content at that position — fixed non-random ~280-byte input, seed 42):
+
+| Flavor | Seam MSE (old) | Seam MSE (new) | Guide fidelity (new) |
+| --- | --- | --- | --- |
+| `value_noise` | 4976.9 | 5707.7 | 4104.0 |
+| `voronoi` | 3962.1 | 4098.1 | 3982.5 |
+| `reaction_diffusion` | 7945.4 | 6402.7 | 4847.0 |
+| `attractor` | 3.9 | 18.5 | n/a (edge-only, unchanged mechanism) |
+
+Seam MSE alone is a limited signal for this change (as `OVERLAP`'s own entry in
+`memory/rejected-ideas.md` already found): it stayed flat or rose slightly for `value_noise`/`voronoi`
+even though direct visual inspection (upscaled PNG, before/after, same method used earlier this
+session) shows a dramatic improvement for both — `voronoi`'s large flat cells now survive
+recognizably across many rows instead of fragmenting into a patchwork of small triangles, and
+`reaction_diffusion`'s coral-like tubes now form real connected loops instead of maze-like noise.
+`attractor`'s much-worse-looking relative seam MSE change (3.9 to 18.5) is both still negligible in
+absolute terms and confirmed unrelated to this change: the same near-empty appearance at this
+particular seed was already present in the pre-existing generator at the old texture size, verified
+directly against the unmodified code.
+Full round-trip correctness verified for all four flavors,
+including payloads large enough to exercise the periodic wraparound past one texture period; full
+`core/` suite (202 tests) and lint (flake8/black/mypy --strict) both pass.
+
+**Ported to `web-demo/` the same day.**
+`web-demo/src/app/core/synthesis.ts` and `textures.ts` mirror every change above line-for-line
+(`guidePatch` replacing `seedIndex`/`seedPatch`, the `positionGuided` flag, toroidal `voronoi`/
+`valueNoise`), and `app.component.ts` passes `flavor !== 'attractor'` at both the obfuscate and
+reveal call sites.
+7 new Karma tests cover per-flavor round-trips past one texture period and
+tile-seam sanity for all three now-periodic generators; all 62 web-demo tests and `ng lint` pass.
+Verified live in a real browser (built `dist/`, served statically, driven with Playwright against
+system Chrome): the `reaction_diffusion` output shows the same real connected-loop structure the
+Python side does, and reveal round-trips correctly for all four flavors.
+
+**What it means, and what was decided.**
+Kept, for `value_noise`/`voronoi`/`reaction_diffusion`/the alignment fix; `attractor` keeps its
+original mechanism unchanged (by design, not a regression).
+This substantially addresses D3's
+original concern (the same two flavors it named) via a different, more fundamental mechanism than
+either of D3's own untried directions, so D3 is closed as superseded rather than attempted
+separately.
+See `memory/wire-protocol.md` and `docs/superpowers/specs/2026-09-09-image-synthesis-redesign-design.md`
+for the full design.
+
 ## 2026-09-09 — SMS/MMS transport reasoning moved out of `README.md` into a clearly-labeled idea in `memory/medium.md`
 
 *keywords: Transport Modes, SMS Size Budget, MMS Support, Pricing, Future medium idea*

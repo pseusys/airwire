@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 
 import { decodeText, encodeText } from './core/markov';
 import { blobToImage, imageToPngBlob } from './core/png';
-import { decode as decodeImage, DEFAULT_TEXTURE_SIZE, encode as encodeImage, Image } from './core/synthesis';
+import { decode as decodeImage, DEFAULT_CANVAS_WIDTH, DEFAULT_PATCH_SIZE, DEFAULT_TEXTURE_SIZE, encode as encodeImage, Image } from './core/synthesis';
 import { TEXTURE_FLAVORS, TextureFlavor, textureByName } from './core/textures';
 
 type DisguiseType = 'text' | 'image';
@@ -113,7 +113,7 @@ export class AppComponent {
       const flavor = this.imageFlavor();
       const seed = this.imageSeed();
       const texture = textureByName(flavor, DEFAULT_TEXTURE_SIZE, seed);
-      const canvas = encodeImage(bytes, texture);
+      const canvas = encodeImage(bytes, texture, DEFAULT_PATCH_SIZE, DEFAULT_CANVAS_WIDTH, flavor !== 'attractor');
       this.obfuscatedImage.set(canvas);
       const blob = await imageToPngBlob(canvas);
       this.replaceObjectUrl(this.obfuscatedImageUrl, blob);
@@ -164,8 +164,9 @@ export class AppComponent {
       if (!source) {
         throw new Error('No image to reveal -- obfuscate a message above, or upload a PNG first.');
       }
-      const texture = textureByName(this.revealFlavor(), DEFAULT_TEXTURE_SIZE, this.revealSeed());
-      const bytes = decodeImage(source, texture, this.revealLength());
+      const revealFlavor = this.revealFlavor();
+      const texture = textureByName(revealFlavor, DEFAULT_TEXTURE_SIZE, this.revealSeed());
+      const bytes = decodeImage(source, texture, this.revealLength(), DEFAULT_PATCH_SIZE, revealFlavor !== 'attractor');
       this.revealedImageText.set(new TextDecoder('utf-8', { fatal: false }).decode(bytes));
     } catch (error) {
       this.imageRevealError.set(error instanceof Error ? error.message : String(error));

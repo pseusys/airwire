@@ -38,6 +38,8 @@ on every push to `main`; it's a stateless demo, not the product.
 | A7. Audit `client/`'s READMEs | Done — real content for `client/app/README.md` (was Flutter-CLI boilerplate) and new `client/medium/README.md` (had none) | `CHANGELOG.md` |
 | A6. Root `README.md`'s License placeholder | Done — owner chose proprietary/all-rights-reserved, stated explicitly | `CHANGELOG.md` |
 | A8. Migrate `docs/superpowers/` into `memory/` | Done — 6 already-shipped files retired (content already covered, plus 3 new `rejected-ideas.md` entries); 1 draft spec and 3 unexecuted plans deliberately kept; found and fixed 2 more dangling doc-links in `core/sources/markov.py`; added a house rule for future specs/plans | `CHANGELOG.md` |
+| D13. Whole-canvas-aware image generation | Done — gap-row patches now scored against the source texture's true content at that position (for 3 of 4 flavors); measured and confirmed a real visual improvement, not just the alignment bug fix | `CHANGELOG.md` |
+| D3. Image texture synthesis visual quality on large-scale-structure textures | Closed, superseded — D13's mechanism addressed the same two flavors this named, via a different approach than either of this item's own untried directions | `CHANGELOG.md` |
 
 ---
 
@@ -104,23 +106,6 @@ no caller in the data path.
 Flagged rather than attempted immediately specifically because the
 analogous ack-nonce work needed two rejected attempts before finding a safe derivation — this deserves
 its own scrutiny, not a quick copy of that reasoning.
-
-### D3. Image texture synthesis visual quality on large-scale-structure textures
-
-**What.** Voronoi and reaction-diffusion textures are still visibly more fragmented than their source
-after seed rows measurably improved them; widening the blend-cost window did not help further (see
-`memory/rejected-ideas.md`).
-Two untried directions remain: shrinking gap rows relative to seed rows,
-or trying Wu & Wang's own irregular scatter-then-fill-gaps layout after all.
-
-**How.** Either is a change to `core/sources/synthesis.py`'s row-placement logic; measure with the
-same independent seam-MSE method the `OVERLAP` experiment used, against the same fixed input, so the
-result is comparable to that entry.
-
-**Why.** Locally-stationary textures (`value_noise`) are already fine; this only affects two of four
-flavors, and round-trip correctness doesn't depend on visual quality — cosmetic, not blocking.
-See
-also D13 for a more fundamental alternative to tuning this one's parameters.
 
 ### D4. Cross-implementation test vectors
 
@@ -222,36 +207,6 @@ the existing chunking/crypto with a shared group key.
 
 **Why.** Directly serves the "people in need" framing with no new transport work — reuses everything
 already built.
-
-### D13. Explore whole-canvas-aware image generation, for visual uniformity
-
-**What.** Confirmed by direct visual inspection (obfuscated the same message under all four texture
-flavors in a live browser session, then upscaled the actual PNG pixel data 6× with nearest-neighbor
-so patch edges stay crisp): the image disguise's blocky, "concatenated from little squares" look is
-the literal designed granularity of the technique — a fixed grid of 8×8-pixel patches
-(`DEFAULT_PATCH_SIZE`), 16 patches wide (`DEFAULT_CANVAS_WIDTH`), alternating untouched seed rows
-with synthesized gap rows chosen one patch at a time.
-D3's two untried directions (shrink gap rows,
-try Wu & Wang's irregular scatter) are incremental tuning of that same grid.
-This item is a more
-fundamental alternative: explore generating the *entire* canvas from the whole payload at once,
-so the result reads as one uniform image rather than a patchwork of independently-chosen tiles.
-
-**How.** Not scoped yet — an open research direction, not a concrete implementation plan.
-Starting
-points worth considering: whether the arithmetic-coding walk can be restructured to choose a whole
-row's (or the whole canvas's) patch assignment jointly instead of greedily one patch at a time,
-while remaining exactly invertible; whether a different reversible-embedding technique entirely
-(not patch-library synthesis) could avoid the seed/gap-row grid altogether; or a cosmetic
-post-blending pass over the existing patch-based output that never touches which patch was chosen
-(anything that does must stay bit-exact and invertible on decode, per
-[`memory/wire-protocol.md`](memory/wire-protocol.md)'s arithmetic-coding contract).
-
-**Why.** The current approach's regularity is a known, deliberate simplification (see
-`memory/rejected-ideas.md`) that trades visual uniformity for implementation simplicity.
-D3's tuning
-ideas address two of four flavors incrementally; this asks whether the underlying grid constraint
-itself can be lifted, which would be a bigger win if it turns out feasible at all.
 
 ---
 

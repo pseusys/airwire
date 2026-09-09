@@ -69,34 +69,42 @@ on both ends).
 Each needs nothing but a size and a seed number to regenerate exactly, so
    both ends produce an identical texture independently — no download, no shared file, unlike the
    text corpora.
+Three of the four are also periodic (tileable): `value_noise` and `voronoi` were
+   made so deliberately, `reaction_diffusion` already was for free (its simulation domain is
+   toroidal); `attractor` isn't (see below).
 2. The texture is cut into a library of small square **patches**.
 The output image is built row by
    row: every *other* row is a **seed row** — real, untouched patches from the source texture,
-   placed by a fixed rule that has nothing to do with the secret data, there purely to anchor the
-   pattern.
+   placed at that row's actual position in the (periodic) texture, there purely to anchor the
+   pattern and carrying no secret data.
 3. The rows in between are **gap rows**, filled one patch at a time.
 For each empty spot,
-   `sources/synthesis.py` scores every patch in the library by how well its edges would blend with
-   the (already-known) patches above, below, and to its left — closer pixel values score better.
+   `sources/synthesis.py` scores every patch in the library by how close a whole-patch match it is
+   to the *true* content the source texture holds at that exact position — not just by how well its
+   edges blend with its neighbors — plus its left edge against the already-placed patch beside it.
    Those scores become the arithmetic coder's weights, exactly as word frequencies did for text:
    good matches are cheap, poor matches expensive, and the ciphertext bits pick which patch
    actually lands there.
+`attractor` is the one exception: it has no exploitable 2-D positional
+   structure (it's a sparse density histogram of a chaotic orbit, not a spatially periodic field),
+   so it keeps the original edge-only scoring instead.
 4. Growth continues row-pair by row-pair until the ciphertext is exhausted; any leftover space in
    the final row is padded with the single best-matching patch, which costs no bits at all — purely
    there to keep the image rectangular.
-5. **Decoding** walks the same grid, recomputes the same blend scores from each gap patch's
-   already-known neighbors, looks up which patch is actually sitting there, and inverts the
-   arithmetic step exactly as the text decoder does.
+5. **Decoding** walks the same grid, recomputes the same scores (true-position match, or edge
+   match for `attractor`) from each gap patch's already-known neighbors, looks up which patch is
+   actually sitting there, and inverts the arithmetic step exactly as the text decoder does.
 
 This is a deliberately simplified adaptation of a real, non-neural 2015 steganography technique
 (Wu & Wang's "reversible texture synthesis") — see
 [`memory/wire-protocol.md`](../memory/wire-protocol.md)
 for what was changed and why, and an honest account of where it currently falls short: it
-round-trips exactly for all four texture styles, but visual quality still varies a lot — smooth
-noise-like textures hold up well, while textures with large connected shapes (Voronoi cells,
-reaction-diffusion tubes) come out more fragmented than their source, because the blend score only
-ever looks at immediate neighboring pixels, with no way to keep a big shape coherent across many
-patches.
+round-trips exactly for all four texture styles.
+Scoring gap-row patches against the texture's true
+content at that position (rather than only against immediate neighbors) measurably closes most of
+the gap for textures with large connected shapes (Voronoi cells, reaction-diffusion tubes) — see
+`memory/wire-protocol.md` for the before/after evidence — `attractor`, which has no such positional
+structure to exploit, is unaffected either way.
 
 Each texture flavor *is* a `ChunkEncoding` (`ImageEncoding` in `sources/synthesis.py`), just one
 whose `encode_atoms` yields exactly one atom — the whole synthesized image, PNG-encoded — instead
@@ -105,7 +113,7 @@ One atom always fills exactly one wire chunk, so `pack_hyperchunk` produces
 `[header, one big chunk]` for an image hyperslice: the "one hyperslice, one image" MMS-attachment
 shape, achieved by reusing all of `sources/chunking.py`'s existing header/ack/retry machinery
 rather than a second delivery path (just with an MMS-scale `chunk_size` instead of an SMS one) —
-see the wire-integration section of design decision #4.
+see [`memory/wire-protocol.md`](../memory/wire-protocol.md).
 
 ### Disguising the header, and where the disguise choice itself comes from
 
@@ -188,9 +196,10 @@ Generated, not committed
 Visual quality
   is still a prototype-stage tradeoff -- see
   [`memory/wire-protocol.md`](../memory/wire-protocol.md)
-  (locally-stationary textures like `value_noise` hold up well; textures with large-scale
-  structure like `voronoi`/`reaction_diffusion` degrade, less so than an earlier naive version but
-  still noticeably).
+  (gap-row patches are scored against the texture's true content at that exact position for three
+  of the four flavors, which measurably closes most of the gap for large-scale structure like
+  `voronoi`/`reaction_diffusion`; `attractor` has no such structure to exploit and keeps the
+  original edge-only scoring).
 
 ## CI
 

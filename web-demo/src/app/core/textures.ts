@@ -19,9 +19,13 @@ function clampByte(value: number): number {
   return Math.trunc(Math.max(0, Math.min(255, value)));
 }
 
+/** Bilinear-upsampled random grid -- smooth, organic-looking, cloud-like blobs. Wraps its coarse
+ * grid modulo its own size (a torus, not a padded plane), so the result tiles seamlessly -- needed
+ * to extend a fixed-size texture across a canvas taller than itself without a visible seam at the
+ * join (see memory/wire-protocol.md). Mirrors `value_noise` in textures.py. */
 export function valueNoise(size: number, seed: number, cell = 8): Texture {
   const rng = new Prng(seed);
-  const gridSize = Math.floor(size / cell) + 2;
+  const gridSize = Math.floor(size / cell);
   const grid = new Float64Array(gridSize * gridSize * 3);
   for (let i = 0; i < grid.length; i++) grid[i] = rng.nextInt(0, 256);
   const gridAt = (yy: number, xx: number, c: number) => grid[(yy * gridSize + xx) * 3 + c];
@@ -31,13 +35,15 @@ export function valueNoise(size: number, seed: number, cell = 8): Texture {
     const gy = y / cell;
     const y0 = Math.floor(gy);
     const fy = gy - y0;
+    const y1 = (y0 + 1) % gridSize;
     for (let x = 0; x < size; x++) {
       const gx = x / cell;
       const x0 = Math.floor(gx);
       const fx = gx - x0;
+      const x1 = (x0 + 1) % gridSize;
       for (let c = 0; c < 3; c++) {
-        const top = gridAt(y0, x0, c) * (1 - fx) + gridAt(y0, x0 + 1, c) * fx;
-        const bot = gridAt(y0 + 1, x0, c) * (1 - fx) + gridAt(y0 + 1, x0 + 1, c) * fx;
+        const top = gridAt(y0, x0, c) * (1 - fx) + gridAt(y0, x1, c) * fx;
+        const bot = gridAt(y1, x0, c) * (1 - fx) + gridAt(y1, x1, c) * fx;
         data[(y * size + x) * 3 + c] = clampByte(top * (1 - fy) + bot * fy);
       }
     }
@@ -45,12 +51,20 @@ export function valueNoise(size: number, seed: number, cell = 8): Texture {
   return { size, data };
 }
 
+/** Cellular partitioning into flat-ish colored regions, shaded by distance to each cell's seed
+ * point so interiors aren't perfectly flat (also avoids duplicate patches within a cell). Distance
+ * is toroidal (wrapped) -- computed against all 9 periodic images of each cell point, not just its
+ * raw coordinates -- so cell borders never mismatch at a tile join (see memory/wire-protocol.md).
+ * Mirrors `voronoi` in textures.py. */
 export function voronoi(size: number, seed: number, nCells = 40): Texture {
   const rng = new Prng(seed);
   const points: [number, number][] = [];
   for (let i = 0; i < nCells; i++) points.push([rng.nextInt(0, size), rng.nextInt(0, size)]);
   const colors: [number, number, number][] = [];
   for (let i = 0; i < nCells; i++) colors.push([rng.nextInt(40, 256), rng.nextInt(40, 256), rng.nextInt(40, 256)]);
+
+  const offsets: [number, number][] = [];
+  for (const oy of [-size, 0, size]) for (const ox of [-size, 0, size]) offsets.push([oy, ox]);
 
   const data = new Uint8Array(size * size * 3);
   const normFactor = size / Math.sqrt(nCells);
@@ -59,12 +73,14 @@ export function voronoi(size: number, seed: number, nCells = 40): Texture {
       let nearestIdx = 0;
       let nearestDistSq = Infinity;
       for (let i = 0; i < nCells; i++) {
-        const dy = y - points[i][0];
-        const dx = x - points[i][1];
-        const distSq = dy * dy + dx * dx;
-        if (distSq < nearestDistSq) {
-          nearestDistSq = distSq;
-          nearestIdx = i;
+        for (const [oy, ox] of offsets) {
+          const dy = y - (points[i][0] + oy);
+          const dx = x - (points[i][1] + ox);
+          const distSq = dy * dy + dx * dx;
+          if (distSq < nearestDistSq) {
+            nearestDistSq = distSq;
+            nearestIdx = i;
+          }
         }
       }
       const shade = 1.0 - 0.35 * Math.max(0, Math.min(1, Math.sqrt(nearestDistSq) / normFactor));

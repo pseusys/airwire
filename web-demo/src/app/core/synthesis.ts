@@ -12,7 +12,10 @@ import { Texture } from './textures';
 
 export const DEFAULT_PATCH_SIZE = 8;
 export const DEFAULT_CANVAS_WIDTH = 16;
-export const DEFAULT_TEXTURE_SIZE = 64;
+// Must equal DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE: the source texture has to be exactly as
+// wide, in patches, as the canvas, or guidePatch's row/col lookup stops corresponding to a real
+// position in the texture (see memory/wire-protocol.md).
+export const DEFAULT_TEXTURE_SIZE = DEFAULT_CANVAS_WIDTH * DEFAULT_PATCH_SIZE;
 
 export interface Image {
   readonly width: number;
@@ -74,12 +77,16 @@ export class PatchLibrary {
   }
 }
 
-function seedIndex(seedOrdinal: number, col: number, canvasWidth: number, librarySize: number): number {
-  return (((seedOrdinal * canvasWidth + col) % librarySize) + librarySize) % librarySize;
-}
-
-function seedPatch(library: PatchLibrary, seedOrdinal: number, col: number, canvasWidth: number): Image {
-  return library.patches[seedIndex(seedOrdinal, col, canvasWidth, library.length)];
+/** The literal patch this (periodic) texture holds at canvas position (row, col) -- used to render
+ * every seed row exactly (real content, no bits consumed) and, for the three position-guided
+ * flavors, as the ground truth gap-row candidates are scored against. Wraps modulo the texture's
+ * own patch grid, so it's well-defined for a canvas of any height, even past one full texture
+ * period (see memory/wire-protocol.md). Mirrors `_guide_patch` in synthesis.py. */
+function guidePatch(texture: Texture, row: number, col: number, patchSize: number): Image {
+  const rowsPerPeriod = Math.floor(texture.size / patchSize);
+  const colsPerPeriod = Math.floor(texture.size / patchSize);
+  const image: Image = { width: texture.size, height: texture.size, data: texture.data };
+  return subImage(image, (row % rowsPerPeriod) * patchSize, (col % colsPerPeriod) * patchSize, patchSize);
 }
 
 function topRow(patch: Image): Uint8Array {
@@ -118,22 +125,43 @@ function edgeCost(a: ArrayLike<number>, b: ArrayLike<number>): number {
   return sum;
 }
 
-/** Weight every library patch by how well it would blend into gap-row position (row, col) --
- * mirrors `_candidate_weights` in synthesis.py, including that decision's outcome: a wider
- * overlap window was tried in the Python original and made results worse, not better (design
- * decision #4), so this stays a single-row/column edge comparison. */
-function candidateWeights(library: PatchLibrary, gapRow: Image[], row: number, col: number, canvasWidth: number): Candidate<number>[] {
-  const above = seedPatch(library, Math.floor((row - 1) / 2), col, canvasWidth);
-  const below = seedPatch(library, Math.floor((row + 1) / 2), col, canvasWidth);
+/** Weight every library patch by how well it would fill gap-row position (row, col), plus its
+ * left edge against the already-chosen gap patch to its left, if any (comparing a wider overlap
+ * region instead of just the touching row of pixels was tried and measurably made this worse, not
+ * better -- see memory/rejected-ideas.md's OVERLAP entry).
+ *
+ * Position-guided flavors (`positionGuided=true`) score the *whole patch* against the true content
+ * this periodic texture holds at exactly this position -- always known, since it's a pure function
+ * of position and the shared seed, not of anything already placed -- which is what lets large-scale
+ * structure (a Voronoi cell, a reaction-diffusion tube) survive: every gap patch is pulled toward
+ * the real image that would be there anyway, not just towards agreeing with its immediate
+ * neighbors. The one flavor without exploitable positional structure (`attractor`) keeps the
+ * original, purely local edge-vs-neighboring-seed-rows cost instead. Mirrors `_candidate_weights`
+ * in synthesis.py. */
+function candidateWeights(library: PatchLibrary, gapRow: Image[], texture: Texture, row: number, col: number, positionGuided: boolean): Candidate<number>[] {
   const left = col > 0 ? gapRow[col - 1] : null;
+  const patchSize = library.patchSize;
 
   const costs: number[] = [];
-  for (const patch of library.patches) {
-    let cost = edgeCost(topRow(patch), bottomRow(above)) + edgeCost(bottomRow(patch), topRow(below));
-    if (left !== null) {
-      cost += edgeCost(leftColumn(patch), rightColumn(left));
+  if (positionGuided) {
+    const target = guidePatch(texture, row, col, patchSize);
+    for (const patch of library.patches) {
+      let cost = edgeCost(patch.data, target.data);
+      if (left !== null) {
+        cost += edgeCost(leftColumn(patch), rightColumn(left));
+      }
+      costs.push(cost);
     }
-    costs.push(cost);
+  } else {
+    const above = guidePatch(texture, row - 1, col, patchSize);
+    const below = guidePatch(texture, row + 1, col, patchSize);
+    for (const patch of library.patches) {
+      let cost = edgeCost(topRow(patch), bottomRow(above)) + edgeCost(bottomRow(patch), topRow(below));
+      if (left !== null) {
+        cost += edgeCost(leftColumn(patch), rightColumn(left));
+      }
+      costs.push(cost);
+    }
   }
   const maxCost = Math.max(...costs);
   return costs.map((cost, index) => [index, BigInt(maxCost - cost + 1)] as Candidate<number>);
@@ -167,20 +195,25 @@ function extractPatchAt(canvas: Image, patchRow: number, patchCol: number, patch
 /** Synthesize `data` into an image: a seed row, then alternating gap/seed row pairs until `data`
  * is fully consumed, padded with best-match filler (no bits consumed) if it runs out mid-row, so
  * the result is always rectangular. Mirrors `encode` in synthesis.py. */
-export function encode(data: Uint8Array, texture: Texture, patchSize = DEFAULT_PATCH_SIZE, canvasWidth = DEFAULT_CANVAS_WIDTH): Image {
+export function encode(
+  data: Uint8Array,
+  texture: Texture,
+  patchSize = DEFAULT_PATCH_SIZE,
+  canvasWidth = DEFAULT_CANVAS_WIDTH,
+  positionGuided = true,
+): Image {
   const library = new PatchLibrary(texture, patchSize);
   const cursor = new BitCursor(data);
-  const rows: Image[][] = [Array.from({ length: canvasWidth }, (_, col) => seedPatch(library, 0, col, canvasWidth))];
+  const rows: Image[][] = [Array.from({ length: canvasWidth }, (_, col) => guidePatch(texture, 0, col, patchSize))];
   let low = 0n;
   let high = 1n;
   let width = 1;
-  let seedOrdinal = 1;
   let rowIndex = 1;
 
   while (cursor.remaining() > 0) {
     const gapRow: Image[] = [];
     for (let col = 0; col < canvasWidth; col++) {
-      const candidates = candidateWeights(library, gapRow, rowIndex, col, canvasWidth);
+      const candidates = candidateWeights(library, gapRow, texture, rowIndex, col, positionGuided);
       if (cursor.remaining() <= 0) {
         let [bestIndex, bestWeight] = candidates[0];
         for (const [index, weight] of candidates) {
@@ -216,8 +249,7 @@ export function encode(data: Uint8Array, texture: Texture, patchSize = DEFAULT_P
     }
 
     rows.push(gapRow);
-    rows.push(Array.from({ length: canvasWidth }, (_, col) => seedPatch(library, seedOrdinal, col, canvasWidth)));
-    seedOrdinal++;
+    rows.push(Array.from({ length: canvasWidth }, (_, col) => guidePatch(texture, rowIndex + 1, col, patchSize)));
     rowIndex += 2;
   }
 
@@ -226,7 +258,7 @@ export function encode(data: Uint8Array, texture: Texture, patchSize = DEFAULT_P
 
 /** Invert `encode`: recover exactly `length` bytes from a synthesized canvas. Mirrors `decode` in
  * synthesis.py. */
-export function decode(canvas: Image, texture: Texture, length: number, patchSize = DEFAULT_PATCH_SIZE): Uint8Array {
+export function decode(canvas: Image, texture: Texture, length: number, patchSize = DEFAULT_PATCH_SIZE, positionGuided = true): Uint8Array {
   const library = new PatchLibrary(texture, patchSize);
   const canvasWidth = Math.floor(canvas.width / patchSize);
   const totalRows = Math.floor(canvas.height / patchSize);
@@ -246,7 +278,7 @@ export function decode(canvas: Image, texture: Texture, length: number, patchSiz
         continue;
       }
 
-      const candidates = candidateWeights(library, gapRow, rowIndex, col, canvasWidth);
+      const candidates = candidateWeights(library, gapRow, texture, rowIndex, col, positionGuided);
       const [ranges, newLow, newHigh, newWidth] = candidateRanges(low, high, width, candidates, accumulator.remaining());
       low = newLow;
       high = newHigh;
