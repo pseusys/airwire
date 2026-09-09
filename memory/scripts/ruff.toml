@@ -27,6 +27,7 @@ select = [
     "ANN",        # flake8-annotations — type hints wherever possible
     "PLC0415",    # no imports inside functions
     "PLR2004",    # magic-value-comparison — use named constants
+    "PTH",        # flake8-use-pathlib — pathlib over os.path
     "PERF",       # perflint — avoidable inefficiency
     "SIM",        # flake8-simplify
     "ICN001",     # idiomatic import aliases, where a convention exists

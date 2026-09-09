@@ -38,7 +38,7 @@ class UnsupportedLanguageError(CorpusError):
 def _download(url: str, destination: Path) -> None:
     """Default downloader: stream `url` to `destination` over HTTP(S)."""
 
-    with urlopen(url) as response, open(destination, "wb") as out_file:
+    with urlopen(url) as response, destination.open("wb") as out_file:
         copyfileobj(response, out_file)
 
 

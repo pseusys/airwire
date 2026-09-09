@@ -28,7 +28,8 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 from os import sep, walk
-from os.path import abspath, dirname, exists, isdir, join, normpath, relpath
+from os.path import normpath
+from pathlib import Path
 from re import IGNORECASE, MULTILINE, Match
 from re import compile as re_compile
 from sys import exit, stderr
@@ -105,16 +106,16 @@ class Report:
         self.passed.append(message)
 
 
-def markdown_files(root: str) -> list[str]:
+def markdown_files(root: Path) -> list[str]:
     """Every markdown file in the tree, as paths relative to root, with / separators."""
     found: list[str] = []
     for dirpath, dirnames, filenames in walk(root):
         dirnames[:] = [name for name in dirnames if name not in SKIP_TREE]
-        found.extend(relpath(join(dirpath, name), root).replace(sep, POSIX_SEP) for name in filenames if name.endswith(MARKDOWN_SUFFIX))
+        found.extend(Path(dirpath, name).relative_to(root).as_posix() for name in filenames if name.endswith(MARKDOWN_SUFFIX))
     return sorted(found)
 
 
-def memory_docs(root: str) -> list[str]:
+def memory_docs(root: Path) -> list[str]:
     """The knowledge-base documents that must appear in both indexes."""
     docs: list[str] = []
     for rel in markdown_files(root):
@@ -129,44 +130,47 @@ def memory_docs(root: str) -> list[str]:
     return docs
 
 
-def read(root: str, rel: str) -> str:
+def read(root: Path, rel: str) -> str:
     """The full text of one file, addressed relative to the repository root."""
-    with open(join(root, rel), encoding=ENCODING) as handle:
-        return handle.read()
+    return (root / rel).read_text(encoding=ENCODING)
 
 
-def check_links(root: str, report: Report) -> None:
+def check_links(root: Path, report: Report) -> None:
     """Every relative link in a markdown file points at something that exists."""
     checked = 0
     for rel in markdown_files(root):
         text = read(root, rel)
-        base = dirname(join(root, rel))
+        base = (root / rel).parent
         for match in LINK.finditer(text):
             target = match.group(1)
             if EXTERNAL_SCHEME.match(target) or target.startswith("#"):
                 continue  # a same-file anchor is not a file path -- nothing to resolve.
             checked += 1
-            if not exists(normpath(join(base, target))):
+            if not (base / target).exists():
                 line = text.count(NEWLINE, 0, match.start()) + 1
                 report.error(f"{rel}:{line}", f"link does not resolve: {target}")
     report.ok(f"{checked} internal links resolve")
 
 
-def linked_docs(root: str, index_rel: str) -> set[str]:
+def linked_docs(root: Path, index_rel: str) -> set[str]:
     """The documents an index file links to, as repository-relative paths."""
-    base = dirname(index_rel)
+    # normpath, not a Path method, because a lexical ".." collapse is needed
+    # without touching the filesystem -- pathlib deliberately has no such
+    # method -- and its native-separator output still needs the sep -> POSIX_SEP
+    # swap below so this matches markdown_files()'s always-posix strings.
+    base = Path(index_rel).parent
     linked: set[str] = set()
     for match in LINK.finditer(read(root, index_rel)):
         target = match.group(1)
         if EXTERNAL_SCHEME.match(target):
             continue
-        linked.add(normpath(join(base, target)).replace(sep, POSIX_SEP))
+        linked.add(normpath(base / target).replace(sep, POSIX_SEP))
     return linked
 
 
-def check_index(root: str, index_rel: str, report: Report) -> None:
+def check_index(root: Path, index_rel: str, report: Report) -> None:
     """Every memory document is reachable from this index."""
-    if not exists(join(root, index_rel)):
+    if not (root / index_rel).exists():
         report.error(index_rel, "index file is missing")
         return
     linked = linked_docs(root, index_rel)
@@ -178,7 +182,7 @@ def check_index(root: str, index_rel: str, report: Report) -> None:
         report.ok(f"{index_rel} routes to all {len(docs)} memory docs")
 
 
-def check_keywords_header(root: str, report: Report) -> None:
+def check_keywords_header(root: Path, report: Report) -> None:
     """Every memory document carries a *keywords:* line near its title."""
     missing = 0
     for rel in memory_docs(root):
@@ -203,7 +207,7 @@ def sentence_breaks(line: str) -> list[int]:
     return [match.start() + 1 for match in SENTENCE_BREAK.finditer(body) if not ABBREV.search(body[: match.start() + 1].rstrip())]
 
 
-def fix_sentence_breaks(root: str, report: Report) -> None:
+def fix_sentence_breaks(root: Path, report: Report) -> None:
     """Split every flagged line at each `sentence_breaks` offset, in place.
 
     Reuses the exact same detection `check_style` warns with, so a fixed file is
@@ -243,12 +247,11 @@ def fix_sentence_breaks(root: str, report: Report) -> None:
             out.append(line[start:].strip())
         if changed:
             fixed_files += 1
-            with open(join(root, rel), "w", encoding=ENCODING) as handle:
-                handle.write(NEWLINE.join(out) + NEWLINE)
+            (root / rel).write_text(NEWLINE.join(out) + NEWLINE, encoding=ENCODING)
     report.ok(f"reflowed {fixed_lines} lines across {fixed_files} files")
 
 
-def check_style(root: str, report: Report) -> None:
+def check_style(root: Path, report: Report) -> None:
     """The markdown conventions that a config-driven linter cannot express."""
     for rel in markdown_files(root):
         text = read(root, rel)
@@ -299,8 +302,8 @@ def main() -> int:
     parser.add_argument("--fix", action="store_true", help="reflow one-sentence-per-line violations in place, then exit")
     args = parser.parse_args()
 
-    root = abspath(args.root)
-    if not isdir(join(root, MEMORY_DIR)):
+    root = Path(args.root).resolve()
+    if not (root / MEMORY_DIR).is_dir():
         print(f"no {MEMORY_DIR}/ directory under {root}; run from the repository root", file=stderr)
         return EXIT_MISUSE
 

@@ -51,6 +51,9 @@ Real project code lives in `core/`; `memory/scripts/` is separate tooling with i
   Standard-library imports follow the same rule, and go at the top with everything else.
   The one deliberate exception: an optional, heavy dependency gated behind a `pyproject.toml` extra (`markovify` in `scripts/model.py`, `grpc_tools` in `scripts/process.py`, both `devel`-only) is imported inside the one function that needs it, so importing the module itself doesn't force that extra to be installed.
 - **Constants at module level, in `UPPER_SNAKE_CASE`**, above the first function.
+- **`pathlib.Path` for all filesystem access, never `os.path` or a bare `open()` on a string path.**
+  A `Path` composes with `/` instead of nested `join()` calls, and its methods (`.exists()`, `.open()`, `.iterdir()`, `.read_text()`) read as an operation on the path rather than a free function that happens to take one as an argument.
+  Already the house style throughout `core/`; enforced by ruff's `PTH` rules in `memory/scripts/`, advisory only in `core/` since `flake8` has no equivalent plugin installed.
 - **Linted with `flake8` + `black` + `mypy --strict`**, all three run together by
   [`core/scripts/codestyle.py`](../core/scripts/codestyle.py) — not `ruff`.
   `flake8` selects `E`/`W`/`F` with `E24`, `W503`, `E203` ignored (`E203` conflicts with `black`);
@@ -115,5 +118,6 @@ ruff check --config memory/scripts/ruff.toml memory/scripts/
 ```
 
 [`scripts/ruff.toml`](scripts/ruff.toml) selects rules that map to the guidelines above rather than
-a generic preset: `PLR2004` is "named constants", `PLC0415` is "imports at the top", `ANN` is "type
+a generic preset: `PLR2004` is "named constants", `PLC0415` is "imports at the top", `PTH` is
+"pathlib over os.path", `ANN` is "type
 hints", `I` is import ordering.
