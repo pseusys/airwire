@@ -42,6 +42,61 @@ entry of the new cycle.
 
 ---
 
+## 2026-09-09 — Full repo coding-guidelines review, closing TODO A3
+
+*keywords: import json, _load_model, markovify, grpc_tools, historical-narrative docstrings*
+
+**Auditing `core/`, `client/`, and `web-demo/` against `memory/coding-guidelines.md` as actually
+written (not just "does the linter pass") found one real violation, two rules that didn't match
+legitimate pre-existing practice, and one larger stylistic tension worth a decision rather than a
+silent rewrite.**
+
+**What changed in the code.**
+`core/sources/markov.py`'s `_load_model` had a function-local `import json` — plain stdlib, no
+justification for a lazy import — moved to the top of the file with the rest of the module's
+imports. Verified: `poetry poe lint` and `test_markov.py`'s 32 tests both still pass.
+
+**What it means, and what was decided.**
+Two other function-local imports found (`scripts/model.py`'s `markovify`, `scripts/process.py`'s
+`grpc_tools`) turned out to be deliberate: both are optional, `devel`-extra-only dependencies,
+lazily imported so importing the module itself doesn't force the extra to be installed —
+`memory/coding-guidelines.md`'s Python section now documents this as an explicit exception rather
+than leaving the rule to look violated. Similarly, "test code lives in its own tree" didn't actually
+describe `web-demo/`'s already-established, idiomatic-Angular co-located `*.spec.ts` convention —
+documented as the one deliberate exception instead of being "fixed" by moving working test files.
+The larger finding — `core/`'s most-explained modules (`markov.py`, `chunking.py`) narrate history
+inline in their docstrings ("Resolved: X used to Y"), predating and at odds with this session's own
+"comments describe the code, never how it came to be" rule — was filed as `TODO.md` E3 rather than
+rewritten unilaterally: it's core/'s established documentation voice across several files, and
+unwinding it is a real editing decision, not a mechanical fix.
+
+## 2026-09-09 — `web-demo/src/app/core/`'s five untested modules get unit test coverage, closing TODO A5
+
+*keywords: arithmetic.spec.ts, synthesis.spec.ts, textures.spec.ts, prng.spec.ts, png.spec.ts*
+
+**Only `markov.ts` had a dedicated spec file; `arithmetic.ts`, `synthesis.ts`, `textures.ts`,
+`prng.ts`, and `png.ts` had none at all** — a regression in any of them previously surfaced only as
+a component-level test failure (if at all) or a manual browser check. All five now have real unit
+tests, 42 new tests total, following `markov.spec.ts`'s established pattern (round-trip,
+determinism, seed/data-differs-across-runs).
+
+**What changed in the code.**
+`arithmetic.spec.ts` (19 tests: `ceilLog2Ratio`'s exact-power-of-two edge case the module's own
+docstring flags as the reason it isn't a literal float-log2 port, `candidateRanges`' proportional
+partitioning, `BitCursor`/`BitAccumulator` round-tripping arbitrary bytes). `synthesis.spec.ts`
+(5 tests: encode/decode round trip across payload sizes including empty, canvas-dimension
+invariants, determinism, decode failing closed against the wrong texture *and* against a tampered
+patch — the image disguise's own version of Markov's tamper-detection tests).
+`textures.spec.ts` (6 tests: determinism and seed-differs for all four flavors, `textureByName`
+dispatch). `prng.spec.ts` (10 tests: `Prng`'s bounds and determinism, `chainSeed`'s determinism and
+32-bit-unsigned output). `png.spec.ts` (2 tests: a real browser canvas round trip via
+`imageToPngBlob`/`blobToImage`, confirming the bit-exactness the module's docstring claims — not
+just assumed from "PNG is lossless" in the abstract).
+
+**What it means, and what was decided.**
+55/55 tests pass (13 pre-existing + 42 new), full suite runs in ~2 seconds; `ng lint` reports zero
+issues on the new files. TODO item A5 is closed; see `TODO.md`'s "Completed and drained" table.
+
 ## 2026-09-09 — `client/` and `web-demo/` both get CI-enforced lint, closing TODO A1/A2
 
 *keywords: client.yml, angular-eslint, ng lint, flutter analyze, dart analyze, eslint.config.js*

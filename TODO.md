@@ -33,37 +33,8 @@ on every push to `main`; it's a stateless demo, not the product.
 | A1. Run `client/`'s tests and lint in CI | Done — `.github/workflows/client.yml` added (lint + test jobs, both packages) | `CHANGELOG.md` |
 | A2. Add a linter to `web-demo/` | Done — `angular-eslint@19` via `ng add`, wired into `.github/workflows/web-demo.yml`; 3 pre-existing violations auto-fixed | `CHANGELOG.md` |
 | A4. Fix `core/` source comments pointing at deleted `docs/design-decisions.md` | Done — 8 files, 22 lines fixed (broader than originally scoped); also fixed a pre-existing mypy failure found along the way | `CHANGELOG.md` |
-
-### A3. Full repo review for the new documentation layout's coding standards and lint alignment
-
-**What.** Go through `core/`, `client/`, and `web-demo/` and check each against
-[`memory/coding-guidelines.md`](memory/coding-guidelines.md) as actually written — not just "does the
-configured linter pass," but the bullets that have no linter behind them yet (named constants,
-imports at the top, no backward-compatibility shims, doc-comment placement).
-
-**How.** One pass per sub-project, cross-referencing the relevant `coding-guidelines.md` section;
-file a follow-up item here for anything that needs a real code change rather than fixing silently
-along the way.
-
-**Why.** This documentation layout is new, and its coding-guidelines content was written from what
-the *tooling* already enforces (flake8/black/mypy, flutter_lints, TypeScript strictness) — it hasn't
-yet been checked against what the *code itself* actually does everywhere. Related to A1/A2, but
-broader: those two are pure tooling gaps, this is "does the code match the rules now that they're
-written down."
-
-### A5. Web-demo unit test coverage gap: `arithmetic.ts`, `synthesis.ts`, `textures.ts`, `prng.ts`, `png.ts`
-
-**What.** Only `markov.ts` has a dedicated spec file (`markov.spec.ts`); the other five modules under
-`web-demo/src/app/core/` have no unit tests at all — only `app.component.spec.ts`'s
-component-level smoke test exercises them indirectly.
-
-**How.** Follow `markov.spec.ts`'s pattern (round-trip, determinism, seed-differs-across-runs) for
-each module; `arithmetic.ts` and `synthesis.ts` are the highest-value targets, since they're the
-shared coder and the image disguise's core logic, respectively.
-
-**Why.** A regression in any of these five currently surfaces only as a component-level test
-failure (if at all) or a manual browser check — there's no unit-level signal pointing at which
-module actually broke.
+| A5. Web-demo unit test coverage gap | Done — 5 new spec files, 42 tests, all passing; 0 lint issues | `CHANGELOG.md` |
+| A3. Full repo coding-guidelines review | Done — found and fixed 1 real violation (inline `import json`), documented 2 legitimate pre-existing exceptions, filed 1 finding needing a decision (E3) | `CHANGELOG.md` |
 
 ### A6. Root `README.md`'s License section is an unresolved placeholder
 
@@ -363,3 +334,19 @@ airwire's trust model, must be clearly labeled as lower-privacy, never a silent 
 **platform risk** (using FCM as a generic message channel is also how real Android malware operates —
 needs a transparent, disclosed implementation to avoid tripping app-store malware heuristics). Not
 "serverless" despite appearances — needs the Phase 2 relay server's privileged credentials regardless.
+
+### E3. Decide whether `core/`'s historical-narrative docstrings should move to `CHANGELOG.md`
+
+Found during A3's coding-guidelines review. Several `core/sources/*.py` module docstrings narrate
+what changed and when, inline — `markov.py`'s "Known limitations" section has four "Resolved: X used
+to Y, now Z" bullets; `chunking.py`'s "Scope and open questions" section similarly narrates the
+ack-nonce-derivation attempt-and-revert inline, even though that same history now also lives in
+[`memory/rejected-ideas.md`](memory/rejected-ideas.md). This is a genuine, pervasive, clearly
+*deliberate* style predating this session's `memory/coding-guidelines.md`, which says "Comments
+describe the code, never how it came to be... History goes in `CHANGELOG.md`, reasoning in
+`memory/`." Not rewritten silently as part of A3 — the pattern is core/'s established documentation
+voice across its most-explained modules, and unwinding it is a real editing task, not a mechanical
+fix. Needs a decision: (a) keep it as a working, intentional exception — arguably valuable context
+sitting physically next to the code it explains, hasn't caused a real problem — and update
+`memory/coding-guidelines.md`'s "Everywhere" rule to say so explicitly; or (b) actually migrate this
+narrative out into `CHANGELOG.md`/`memory/`'s proper homes across every affected module.

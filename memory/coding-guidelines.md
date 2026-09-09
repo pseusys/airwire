@@ -24,8 +24,9 @@ Workflow rules — what to edit, when to abstract, what to re-run — are in [`d
   When one file in this project needs another, import it; do not shell out to it, re-exec it, or read its output.
 - **Prefer long lines to broken ones**, wherever the linter does not specifically enforce otherwise.
   The exception is markdown, which is one sentence per line — see [`dos-and-donts.md`](dos-and-donts.md).
-- **Test code lives in its own tree, mirroring the source tree.**
+- **Test code lives in its own tree, mirroring the source tree — except `web-demo/`.**
   `core/tests/` mirrors `core/sources/`; `client/*/test/` mirrors `client/*/lib/`; test-only helpers never sit in the sources they exercise.
+  `web-demo/`'s `*.spec.ts` files are the one deliberate exception, co-located next to the file they test (`arithmetic.ts`/`arithmetic.spec.ts`) — the idiomatic Angular CLI convention, already established before this rule was written down, not overridden here.
 - **Do not embed generated content in code.**
   Configuration, environment files and fixtures live as separate template files, not as string literals inside a program.
 
@@ -48,6 +49,7 @@ Real project code lives in `core/`; `memory/scripts/` is separate tooling with i
 - **Type hints wherever the language allows them.**
 - **`from module import name`, not `import module`**, so call sites read as the name and not the path.
   Standard-library imports follow the same rule, and go at the top with everything else.
+  The one deliberate exception: an optional, heavy dependency gated behind a `pyproject.toml` extra (`markovify` in `scripts/model.py`, `grpc_tools` in `scripts/process.py`, both `devel`-only) is imported inside the one function that needs it, so importing the module itself doesn't force that extra to be installed.
 - **Constants at module level, in `UPPER_SNAKE_CASE`**, above the first function.
 - **Linted with `flake8` + `black` + `mypy --strict`**, all three run together by
   [`core/scripts/codestyle.py`](../core/scripts/codestyle.py) — not `ruff`.

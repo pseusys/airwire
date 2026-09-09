@@ -88,6 +88,7 @@ Known limitations, worth a second look independently of this module:
   derivation, which needs to select a *specific* language/flavor, not just "some Markov text."
 """
 
+import json
 from functools import lru_cache
 from pathlib import Path
 from random import Random
@@ -120,8 +121,6 @@ class MarkovModelError(Exception):
 
 @lru_cache(maxsize=None)
 def _load_model(language: str) -> Tuple[int, _Chain]:
-    import json
-
     path = _DATA_DIR / f"markov_{language}.json"
     if not path.exists():
         raise MarkovModelError(f"No frozen Markov model for language {language!r} at {path}; run `poetry poe train-stego-model` first!")
