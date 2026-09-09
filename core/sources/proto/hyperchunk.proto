@@ -10,7 +10,7 @@ package airwire;
 // rather than sharing one per family -- this is what lets the receiver auto-detect which variant
 // was actually used purely from the header, and what lets sources/handshake.py's obfuscation-mode
 // derivation pick a specific variant deterministically. New variants must be appended, never
-// inserted or renumbered -- see docs/handshake.md's obfuscation-pool ordering note.
+// inserted or renumbered -- see memory/handshake.md's obfuscation-pool ordering note.
 enum ChunkEncoding {
   PLAIN = 0;                          // chunk payloads are the raw ciphertext bytes, unmodified.
   BASE64 = 1;                         // chunk payloads are base64 text -- visible, not plausible.

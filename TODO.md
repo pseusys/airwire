@@ -26,32 +26,13 @@ on every push to `main`; it's a stateless demo, not the product.
 
 ## §A NOW
 
-### A1. Run `client/`'s tests and lint in CI
+### Completed and drained (2026-09-09)
 
-**What.** Add a GitHub Actions workflow (or extend an existing one) that runs `flutter test` +
-`flutter analyze` for `client/app` and `dart test` + `dart analyze` for `client/medium` on every
-push/PR that touches `client/`.
-
-**How.** Mirror `.github/workflows/core.yml`'s shape: `paths: ["client/**", ...]`, `flutter pub get`
-in `client/app`, `dart pub get` in `client/medium`, then the four invocations from
-[`memory/commands.md`](memory/commands.md). No secrets needed — all 10 existing test files run
-offline today.
-
-**Why.** `client/` has 10 test files, working `flutter_lints`/`lints` configs, and zero CI
-enforcement of either — a regression or a lint violation there is currently only caught by someone
-remembering to run them by hand. Every other sub-project already enforces both.
-
-### A2. Add a linter to `web-demo/`
-
-**What.** Configure ESLint (or an equivalent) for `web-demo/`'s TypeScript, and wire it into
-`.github/workflows/web-demo.yml`.
-
-**How.** `ng add @angular-eslint/schematics` is the standard Angular 19 path; then add an `ng lint`
-(or `npx eslint`) step to the existing CI workflow, alongside the existing `ng build`/`ng test` steps.
-
-**Why.** `web-demo/` currently has no quality gate beyond TypeScript's own compiler strictness (no
-ESLint, no Prettier) — see [`memory/coding-guidelines.md`](memory/coding-guidelines.md). Every other
-sub-project has a real linter.
+| Item | Outcome | Written up in |
+| --- | --- | --- |
+| A1. Run `client/`'s tests and lint in CI | Done — `.github/workflows/client.yml` added (lint + test jobs, both packages) | `CHANGELOG.md` |
+| A2. Add a linter to `web-demo/` | Done — `angular-eslint@19` via `ng add`, wired into `.github/workflows/web-demo.yml`; 3 pre-existing violations auto-fixed | `CHANGELOG.md` |
+| A4. Fix `core/` source comments pointing at deleted `docs/design-decisions.md` | Done — 8 files, 22 lines fixed (broader than originally scoped); also fixed a pre-existing mypy failure found along the way | `CHANGELOG.md` |
 
 ### A3. Full repo review for the new documentation layout's coding standards and lint alignment
 
@@ -69,21 +50,6 @@ the *tooling* already enforces (flake8/black/mypy, flutter_lints, TypeScript str
 yet been checked against what the *code itself* actually does everywhere. Related to A1/A2, but
 broader: those two are pure tooling gaps, this is "does the code match the rules now that they're
 written down."
-
-### A4. Fix `core/` source comments that still point at the now-deleted `docs/design-decisions.md`
-
-**What.** `core/sources/crypto.py:52` and `core/sources/chunking.py:44,63,66,119` all reference
-"design decision #1's TODO list" or "the TODO list entry below," pointing at
-`docs/design-decisions.md`, which this session's migration deleted.
-
-**How.** Update each comment to point at the actual current location: the overhead-reduction items
-are now [`TODO.md`](TODO.md) D1/D2, and the reasoning behind them is
-[`memory/wire-protocol.md`](memory/wire-protocol.md).
-
-**Why.** These comments are now dangling references to a file that no longer exists — exactly the
-kind of staleness [`memory/coding-guidelines.md`](memory/coding-guidelines.md)'s "comments describe
-the code, never how it came to be" rule and this session's own docs migration should have caught,
-but source code comments are outside what `verify_memory.py`'s link check scans.
 
 ### A5. Web-demo unit test coverage gap: `arithmetic.ts`, `synthesis.ts`, `textures.ts`, `prng.ts`, `png.ts`
 

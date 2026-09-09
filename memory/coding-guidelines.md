@@ -65,16 +65,13 @@ Real project code lives in `core/`; `memory/scripts/` is separate tooling with i
   Flutter rule set, `build/**`/`web/**` excluded from analysis).
 - **`client/medium` is linted with `lints/recommended`** (`client/medium/analysis_options.yaml`) —
   plain Dart rules, not Flutter-specific, since this package has no Flutter dependency.
-- **No CI runs either package's tests yet** — `flutter test` (`client/app`, 5 files) and `dart test`
-  (`client/medium`, 5 files) both pass locally but nothing enforces this on push/PR.
-  Tracked in [`../TODO.md`](../TODO.md) §A.
+- **Both packages' tests and lint run in CI** — [`../.github/workflows/client.yml`](../.github/workflows/client.yml),
+  triggered on any push/PR touching `client/**`.
 
 ## TypeScript / Angular (`web-demo/`)
 
-- **No linter is configured at all** — no ESLint, no Prettier.
-  TypeScript compiler strictness (`strict: true`, `noImplicitOverride`,
-  `noPropertyAccessFromIndexSignature`, `web-demo/tsconfig.json`) is the only current enforcement.
-  Tracked in [`../TODO.md`](../TODO.md) §A.
+- **Linted with `angular-eslint`** (`web-demo/eslint.config.js`, pinned to the `@19` major to match this project's Angular 19 — `ng add`'s default installs `@22`, which warns/refuses to run against a v19 workspace).
+- TypeScript compiler strictness (`strict: true`, `noImplicitOverride`, `noPropertyAccessFromIndexSignature`, `web-demo/tsconfig.json`) applies on top.
 - **Karma + Jasmine** for tests (`ng test`), Angular CLI v19 for build/serve.
 
 ## Markdown
@@ -85,15 +82,11 @@ Real project code lives in `core/`; `memory/scripts/` is separate tooling with i
 
 ## GitHub Actions
 
-Two workflows exist today: [`../.github/workflows/core.yml`](../.github/workflows/core.yml) (lint +
-test `core/` on a Python 3.11/3.12 matrix, trains the Markov corpus, runs example demo invocations)
-and [`../.github/workflows/web-demo.yml`](../.github/workflows/web-demo.yml) (builds `web-demo/`
-against freshly-trained models, runs its Karma suite, deploys to GitHub Pages on push to `main`).
-Neither `client/` package has a workflow yet (see the Dart section above).
+Three workflows exist today: [`../.github/workflows/core.yml`](../.github/workflows/core.yml) (lint + test `core/` on a Python 3.11/3.12 matrix, trains the Markov corpus, runs example demo invocations), [`../.github/workflows/web-demo.yml`](../.github/workflows/web-demo.yml) (builds `web-demo/` against freshly-trained models, lints and runs its Karma suite, deploys to GitHub Pages on push to `main`), and [`../.github/workflows/client.yml`](../.github/workflows/client.yml) (lint + test both `client/` packages).
 
-- **Scope with `paths`.** Both existing workflows already do this — a change that cannot affect a
-  workflow's outcome should not trigger it.
-- **`runs-on: ubuntu-latest`**, matching both existing workflows.
+- **Scope with `paths`.**
+  All three workflows already do this — a change that cannot affect a workflow's outcome should not trigger it.
+- **`runs-on: ubuntu-latest`**, matching all three.
 
 ## Linters
 
@@ -103,7 +96,7 @@ Neither `client/` package has a workflow yet (see the Dart section above).
 | Python (`memory/scripts/`) | `ruff` | [`scripts/ruff.toml`](scripts/ruff.toml) | `ruff check --config memory/scripts/ruff.toml memory/scripts/` |
 | Dart (`client/app`) | `flutter_lints` | `client/app/analysis_options.yaml` | `flutter analyze` (from `client/app`) |
 | Dart (`client/medium`) | `lints/recommended` | `client/medium/analysis_options.yaml` | `dart analyze` (from `client/medium`) |
-| TypeScript (`web-demo/`) | *(none yet)* | `web-demo/tsconfig.json` (compiler strictness only) | — |
+| TypeScript (`web-demo/`) | `angular-eslint@19` | `web-demo/eslint.config.js` | `npx ng lint` (from `web-demo/`) |
 | Markdown | `markdownlint`, `verify_memory.py` | [`../.markdownlint.jsonc`](../.markdownlint.jsonc) | `python memory/scripts/verify_memory.py --strict` |
 
 `core/`'s Python and `memory/scripts/`'s Python are deliberately linted by two different tools, not

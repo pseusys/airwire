@@ -45,12 +45,12 @@ def derive_nonce(*parts: bytes) -> bytes:
     Deterministically derive a `Symmetric.nonce_size`-byte nonce from `parts`, via BLAKE2b. AEAD
     only requires nonce *uniqueness* under a given key, not secrecy or unpredictability -- a
     public, non-secret derivation is exactly what the original per-chunk design already relied on
-    (see design decision #1) -- so this is safe as long as callers guarantee `parts` never repeats
-    for two *different* plaintexts encrypted under the same key. See call sites for how each one
-    arranges that; it is genuinely not free to get right (a naive derivation from an identifier
-    alone is unsafe the moment the same identifier can legitimately carry more than one distinct
-    plaintext over its lifetime -- see design decision #1's TODO list for a worked example of
-    exactly that trap, found and then deliberately avoided).
+    (see memory/wire-protocol.md) -- so this is safe as long as callers guarantee `parts` never
+    repeats for two *different* plaintexts encrypted under the same key. See call sites for how
+    each one arranges that; it is genuinely not free to get right (a naive derivation from an
+    identifier alone is unsafe the moment the same identifier can legitimately carry more than one
+    distinct plaintext over its lifetime -- see memory/rejected-ideas.md's header/ack-nonce entry
+    for a worked example of exactly that trap, found and then deliberately avoided).
     """
 
     return derive_key(*parts, size=Symmetric.nonce_size)

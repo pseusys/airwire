@@ -5,7 +5,7 @@ key `sources/chunking.py` uses from there on. Also derives, from nothing but eac
 public transport identifier, the one disguise choice (Markov language or texture flavor) that
 sender's messages -- handshake certificate included -- are wrapped in for the entire conversation,
 so nothing about a conversation's outward appearance changes between the first message and the
-last. See docs/handshake.md for the full design and its security properties and limits; this
+last. See memory/handshake.md for the full design and its security properties and limits; this
 module is the direct implementation of that document, function for function.
 """
 
@@ -21,7 +21,7 @@ from sources.proto import handshake_pb2
 from sources.synthesis import SYNTHESIS_ATTRACTOR, SYNTHESIS_REACTION_DIFFUSION, SYNTHESIS_VALUE_NOISE, SYNTHESIS_VORONOI
 
 # Order is part of the wire-compatible protocol -- append new entries, never insert or reorder, or
-# every existing sender's derived obfuscation choice silently changes. See docs/handshake.md.
+# every existing sender's derived obfuscation choice silently changes. See memory/handshake.md.
 DISGUISE_POOL: Tuple[ChunkEncoding, ...] = (
     MARKOV_ENG,
     MARKOV_RUS,
@@ -57,7 +57,7 @@ def obfuscation_for_sender(sender_id: str) -> ChunkEncoding:
     already-public, transport-visible identifier (a phone number in SMS mode, the equivalent
     platform user ID in web mode): both ends can compute this independently, with no exchange, no
     negotiation, and no pre-shared secret, because there's nothing here that needs to stay secret
-    -- see docs/handshake.md's security-properties table for why that's fine.
+    -- see memory/handshake.md's security-properties table for why that's fine.
     """
 
     digest = derive_key(sender_id.encode("utf-8"), b"airwire-obfuscation-mode", size=8)
@@ -69,7 +69,7 @@ def _bootstrap_key(sender_id: str) -> Symmetric:
     """
     The key that encrypts `sender_id`'s own certificate message -- derivable by anyone who knows
     who the sender is, i.e. everyone, so this provides no confidentiality, only AEAD-shaped bytes
-    for the disguise coder to run on. See docs/handshake.md.
+    for the disguise coder to run on. See memory/handshake.md.
     """
 
     return Symmetric(key=derive_key(sender_id.encode("utf-8"), b"airwire-handshake-bootstrap", size=32))
@@ -95,7 +95,7 @@ class EphemeralKeypair(NamedTuple):
 
 def generate_ephemeral_keypair() -> EphemeralKeypair:
     """A fresh X25519 keypair, scoped to one conversation -- not a long-term identity (see
-    docs/handshake.md's plain-TOFU security properties and their limits)."""
+    memory/handshake.md's plain-TOFU security properties and their limits)."""
 
     private_key = token_bytes(_PUBLIC_KEY_SIZE)
     return EphemeralKeypair(private_key, crypto_scalarmult_base(private_key))
@@ -119,7 +119,7 @@ def receive_certificate(sender_id: str, message: bytes) -> bytes:
     same disguise and bootstrap key the sender used. Raises `HandshakeError`/`ValueError` if the
     message doesn't decode, or if it claims a different sender than expected (plain TOFU still
     checks the claim is internally consistent, even though nothing here can verify it's true --
-    see docs/handshake.md's security-properties table for what this can and can't catch).
+    see memory/handshake.md's security-properties table for what this can and can't catch).
     """
 
     disguise = obfuscation_for_sender(sender_id)
@@ -135,7 +135,7 @@ def receive_certificate(sender_id: str, message: bytes) -> bytes:
 def derive_session_key(own_private_key: bytes, own_public_key: bytes, peer_public_key: bytes) -> Symmetric:
     """
     Standard X25519 ECDH between this conversation's two ephemeral keypairs, giving both sides an
-    identical `Symmetric` session key for the data phase -- see docs/handshake.md's Phase 2. The
+    identical `Symmetric` session key for the data phase -- see memory/handshake.md's Phase 2. The
     two public keys are sorted before hashing so both sides land on the same derivation regardless
     of who's "self" and who's "peer" -- without that, each side would hash them in the opposite
     order and derive different keys.

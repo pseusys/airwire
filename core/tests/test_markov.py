@@ -170,10 +170,10 @@ def test_round_trip_still_correct_when_filler_is_used() -> None:
 
 
 def test_finish_sentence_raises_when_no_path_to_end_exists() -> None:
-    begin_state = (BEGIN_TOKEN, BEGIN_TOKEN)
-    state_a = ("stuck", "here")
-    state_b = ("here", "stuck")
-    chain = {
+    begin_state: tuple[str, ...] = (BEGIN_TOKEN, BEGIN_TOKEN)
+    state_a: tuple[str, ...] = ("stuck", "here")
+    state_b: tuple[str, ...] = ("here", "stuck")
+    chain: dict[tuple[str, ...], list[tuple[str, int]]] = {
         state_a: [("stuck", 1)],
         state_b: [("here", 1)],
     }

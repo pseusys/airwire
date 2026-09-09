@@ -63,7 +63,7 @@ export function addDigitsToRange(low: bigint, high: bigint, width: number, desir
  * integer weights, growing the range (up to `budget` bits) first if it isn't wide enough to give
  * every candidate at least one position -- candidates that still don't fit even then are simply
  * unreachable at this step. Pure integer (bigint) arithmetic throughout. */
-export function candidateRanges<T>(low: bigint, high: bigint, width: number, candidates: ReadonlyArray<Candidate<T>>, budget: number): [CandidateRange<T>[], bigint, bigint, number] {
+export function candidateRanges<T>(low: bigint, high: bigint, width: number, candidates: readonly Candidate<T>[], budget: number): [CandidateRange<T>[], bigint, bigint, number] {
   const denominator = candidates.reduce((sum, [, weight]) => sum + weight, 0n);
   [low, high, width] = addDigitsToRange(low, high, width, denominator, budget);
   const rangeSize = high - low + 1n;

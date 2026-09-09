@@ -42,6 +42,59 @@ entry of the new cycle.
 
 ---
 
+## 2026-09-09 — `client/` and `web-demo/` both get CI-enforced lint, closing TODO A1/A2
+
+*keywords: client.yml, angular-eslint, ng lint, flutter analyze, dart analyze, eslint.config.js*
+
+**Every sub-project now runs its tests and its linter in CI — previously only `core/` did.**
+`.github/workflows/client.yml` (new) runs `flutter test`+`flutter analyze` for `client/app` and
+`dart test`+`dart analyze` for `client/medium` on every push/PR touching `client/`.
+`.github/workflows/web-demo.yml` gained an `ng lint` step, using `angular-eslint@19` (matching the
+project's Angular 19, not the `@22` `ng add` installs by default) added via `ng add angular-eslint@19`.
+
+**What changed in the code.**
+`web-demo/eslint.config.js` (new), `web-demo/angular.json` (new `lint` architect target),
+`web-demo/package.json` (new `lint` script + devDependencies). Fixed the 3 pre-existing violations
+`ng lint` immediately surfaced, all auto-fixable and behavior-preserving:
+`arithmetic.ts`'s `candidateRanges` now takes `readonly Candidate<T>[]` instead of
+`ReadonlyArray<Candidate<T>>` (style-only), and `textures.ts`'s `reactionDiffusion` declares its two
+never-reassigned `Float64Array`s (`u`, `v`) with `const` instead of `let`.
+
+**What it means, and what was decided.**
+Both new CI jobs were verified locally before being trusted (`flutter analyze`/`dart analyze`/
+`flutter test`/`dart test` all pass; `ng lint` reports zero issues after the fixes above) — not just
+assumed to work from the workflow YAML alone. TODO items A1 and A2 are closed; see `TODO.md`'s
+"Completed and drained" table.
+
+## 2026-09-09 — `core/` source comments no longer point at the deleted `docs/design-decisions.md`
+
+*keywords: derive_nonce, HyperchunkHeader, _HEADER_DISGUISE_SEED, hyperchunk.proto, handshake.proto*
+
+**A grep for "design decision #" and "docs/design-decisions\|roadmap\|crypto-summary\|handshake\|medium-"
+across all of `core/` found 22 stale lines across 8 files, not the 2 files TODO item A4 originally
+scoped** — the prior session's docs migration had only checked markdown files' links
+(`verify_memory.py` doesn't scan source code), not source comments/docstrings referencing the same
+now-deleted docs by name.
+
+**What changed in the code.**
+Fixed in `core/sources/{crypto,chunking,markov,handshake,synthesis}.py`,
+`core/sources/proto/{hyperchunk,handshake}.proto`, and `core/scripts/demo.py`: every
+`docs/handshake.md` reference now points at `memory/handshake.md`; every `design decision #N`/
+`docs/design-decisions.md` reference now points at the specific place that content actually lives
+(`memory/wire-protocol.md`, `memory/rejected-ideas.md`'s relevant entry, or `TODO.md` D1/D2, depending
+on which). Also fixed, found by re-running `poetry poe lint` after these edits: a pre-existing mypy
+failure in `core/tests/test_markov.py::test_finish_sentence_raises_when_no_path_to_end_exists` — a
+test-local `chain` dict inferred with fixed-arity `tuple[str, str]` keys, incompatible with
+`_finish_sentence`'s `Dict[Tuple[str, ...], ...]` parameter type; fixed with explicit
+`dict[tuple[str, ...], ...]` annotations on `chain`/`begin_state`/`state_a`/`state_b`.
+
+**What it means, and what was decided.**
+`poetry poe lint` and the full `pytest` suite (174 tests) both pass clean after these changes — run,
+not assumed. TODO item A4 is closed; see `TODO.md`'s "Completed and drained" table. Source-code
+comments referencing `memory/`/`TODO.md` locations are exactly the kind of reference
+`verify_memory.py` cannot check (it only scans `.md` files) — worth remembering next time a `memory/`
+file gets renamed or retired.
+
 ## 2026-09-08 — Documentation layout adopted from `agentic-layout-template`
 
 *keywords: AGENTS.md, memory/, wire-protocol.md, handshake.md, medium.md, rejected-ideas.md, verify_memory.py*

@@ -1,0 +1,62 @@
+name: client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "client/**"
+      - ".github/workflows/client.yml"
+  pull_request:
+    paths:
+      - "client/**"
+      - ".github/workflows/client.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # A pub workspace resolves once for both members (client/app, client/medium) into the
+      # shared client/pubspec.lock -- running it from client/app is enough for both.
+      - name: Install dependencies
+        working-directory: client/app
+        run: flutter pub get
+
+      - name: Analyze client/app (flutter_lints)
+        working-directory: client/app
+        run: flutter analyze
+
+      - name: Analyze client/medium (lints/recommended)
+        working-directory: client/medium
+        run: dart analyze
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: client/app
+        run: flutter pub get
+
+      - name: Test client/app
+        working-directory: client/app
+        run: flutter test
+
+      - name: Test client/medium
+        working-directory: client/medium
+        run: dart test

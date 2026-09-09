@@ -3,12 +3,12 @@ Manual, human-readable walkthrough of the crypto + chunking + wire-encoding pipe
 message, packs it into wire-sized hyperchunk messages under a chosen `ChunkEncoding` -- including,
 now, one whole synthesized image per hyperchunk for the `sources.synthesis` flavors, which go
 through exactly the same `pack_hyperchunk`/`receive_hyperchunk` path as everything else (see
-design decision #4) -- then receives and decrypts it back, printing what happens at each step. Not
-a substitute for the test suite (`poetry poe test`) -- this is for eyeballing what actually goes
+memory/wire-protocol.md) -- then receives and decrypts it back, printing what happens at each step.
+Not a substitute for the test suite (`poetry poe test`) -- this is for eyeballing what actually goes
 over the wire in each mode.
 
 `poetry poe demo-handshake` (`run_handshake`, below) is a separate entry point demonstrating
-`sources/handshake.py`'s session establishment end to end -- see docs/handshake.md.
+`sources/handshake.py`'s session establishment end to end -- see memory/handshake.md.
 """
 
 from typing import Dict, Optional
@@ -62,7 +62,7 @@ def run(
     `ChunkEncoding` name -- plain/base64/markov/markov_rus, or a texture flavor
     (value_noise/voronoi/reaction_diffusion/attractor), which yields exactly one wire chunk (the
     whole synthesized image, saved to `image_path`) instead of many small ones. `header_mode`, if
-    given, additionally disguises the header message the same way -- see docs/handshake.md for
+    given, additionally disguises the header message the same way -- see memory/handshake.md for
     where that choice is meant to come from in practice.
     :return: exit code integer -- 0 on a successful round trip, 1 otherwise.
     """
@@ -132,7 +132,7 @@ def run_handshake(
     bob_id: str = "+15559876543",
 ) -> int:
     """
-    Demonstrates docs/handshake.md end to end -- certificate exchange, session key derivation,
+    Demonstrates memory/handshake.md end to end -- certificate exchange, session key derivation,
     then one hyperchunk of real data sent through the result -- printing each phase's output.
     `alice_id`/`bob_id` are the platform-specific transport identifiers each side's own messages
     get their (independently-derived, no-negotiation-needed) obfuscation mode from.

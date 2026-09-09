@@ -28,7 +28,7 @@ jobs:
 
       # web-demo has no code dependency on core/'s Python package -- it only needs the frozen
       # per-language Markov models core/ trains, so this job builds just enough of core/ to
-      # produce those (see sources/handshake.md and web-demo/README.md for why the two are
+      # produce those (see memory/handshake.md and web-demo/README.md for why the two are
       # independent implementations of the same mechanism, not one calling the other).
       - uses: actions/setup-python@v5
         with:
@@ -68,6 +68,10 @@ jobs:
       - name: Install web-demo dependencies
         working-directory: web-demo
         run: npm ci
+
+      - name: Lint
+        working-directory: web-demo
+        run: npx ng lint
 
       # GitHub Pages serves a project (non-<user>.github.io) repo at /<repo-name>/, not /, so the
       # app needs to know its own base path to resolve asset and route URLs correctly.

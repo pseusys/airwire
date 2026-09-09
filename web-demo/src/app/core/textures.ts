@@ -85,8 +85,8 @@ export function reactionDiffusion(size: number, seed: number, steps = 3000): Tex
   const feed = 0.06;
   const kill = 0.062;
   const n = size * size;
-  let u = new Float64Array(n).fill(1);
-  let v = new Float64Array(n).fill(0);
+  const u = new Float64Array(n).fill(1);
+  const v = new Float64Array(n).fill(0);
 
   const wrap = (i: number) => ((i % size) + size) % size;
   const at = (y: number, x: number) => wrap(y) * size + wrap(x);

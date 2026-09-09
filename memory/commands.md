@@ -30,10 +30,10 @@ cd client/app && flutter pub get      # or: cd client/medium && dart pub get
 ```
 
 ```bash
-cd client/app && flutter test         # 5 test files, not run in CI yet -- see TODO.md
-cd client/app && flutter analyze      # flutter_lints
-cd client/medium && dart test         # 5 test files, not run in CI yet -- see TODO.md
-cd client/medium && dart analyze      # lints/recommended
+cd client/app && flutter test         # 5 test files, runs in CI
+cd client/app && flutter analyze      # flutter_lints, runs in CI
+cd client/medium && dart test         # 5 test files, runs in CI
+cd client/medium && dart analyze      # lints/recommended, runs in CI
 ```
 
 ## `web-demo/` (Angular 19, npm)
@@ -47,6 +47,7 @@ npm run sync-models             # copies core/sources/data/markov_*.json into pu
 npm start                       # sync-models, then ng serve
 npm run build                   # sync-models, then ng build
 npx ng test --watch=false --browsers=ChromeHeadless   # Karma/Jasmine, run in CI
+npx ng lint                     # angular-eslint@19, run in CI
 ```
 
 ## Checks
@@ -56,10 +57,9 @@ python memory/scripts/verify_memory.py   # docs: links, indexes, markdown rules
 python memory/scripts/verify_memory.py --strict   # same, plus style warnings
 ```
 
-Full test suites (`poetry poe test`, `npx ng test --watch=false --browsers=ChromeHeadless`) run in
-CI on every push/PR that touches their paths (`.github/workflows/core.yml`,
-`.github/workflows/web-demo.yml`). `client/`'s tests currently only run by hand — see
-[`../TODO.md`](../TODO.md) §A.
+Full test suites (`poetry poe test`, `npx ng test --watch=false --browsers=ChromeHeadless`,
+`flutter test`, `dart test`) run in CI on every push/PR that touches their paths
+(`.github/workflows/core.yml`, `.github/workflows/web-demo.yml`, `.github/workflows/client.yml`).
 
 ## Linting
 
@@ -69,10 +69,8 @@ ruff check --config memory/scripts/ruff.toml memory/scripts/   # this knowledge 
 python memory/scripts/verify_memory.py --strict                # markdown house rules
 flutter analyze                                                # from client/app
 dart analyze                                                   # from client/medium
+npx ng lint                                                    # from web-demo/
 ```
-
-`web-demo/` has no linter configured yet — see [`coding-guidelines.md`](coding-guidelines.md) and
-[`../TODO.md`](../TODO.md) §A.
 
 ## Commands whose output is easy to misread
 

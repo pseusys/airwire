@@ -11,7 +11,8 @@ its public API is shaped for bulk (de)compression of an *already-known* symbol c
 needs answered. Hands-on testing confirmed its `RangeDecoder` cannot safely be asked to keep
 decoding past its real input (even generously zero- or randomly-padded) without eventually
 corrupting its own internal invariants -- it isn't designed for open-ended, self-terminating
-decoding. See [design decision #2](../../docs/design-decisions.md) for the full story.
+decoding. See [memory/rejected-ideas.md](../../memory/rejected-ideas.md)'s `constriction` entry for
+the full story.
 
 Instead, this module implements a small, from-scratch binary arithmetic coder directly on the
 frozen model's integer word-transition counts, adapted from Hernan Moraldo's reference design
@@ -45,7 +46,7 @@ How it works:
   state that was active when it was chosen, and accumulates the same locked-in bits into the
   output instead of reading them from a cursor. Because it's the same integer arithmetic run in
   the same order, it's byte-for-byte deterministic on any device, with no floating point or ML
-  inference anywhere in this path -- the property [design decision #1](../../docs/design-decisions.md)
+  inference anywhere in this path -- the property [memory/wire-protocol.md](../../memory/wire-protocol.md)
   requires.
 
 Known limitations, worth a second look independently of this module:

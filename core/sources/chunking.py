@@ -45,7 +45,7 @@ Terminology, and the wire format that comes out of it:
   fixed-size ciphertext is additionally run through `header_encoding` the same way payload
   ciphertext is. This exists so a conversation's wire traffic never has one raw-binary-looking
   message sitting next to a stream of otherwise-disguised ones. See
-  [docs/handshake.md](../../docs/handshake.md) for where `header_encoding` (and the payload
+  [memory/handshake.md](../../memory/handshake.md) for where `header_encoding` (and the payload
   `encoding`) are actually decided -- both are meant to be **session-scoped constants**, chosen
   once and held fixed for a conversation's lifetime, the same way the `symmetric` key object
   itself is expected to stay one consistent value across a session's calls. Nothing in this module
@@ -59,12 +59,12 @@ Scope and open questions, worth a second look independently of this module:
   nonces to never repeat under a given key) but it is a deliberate simplification — a
   domain-separated key per message class would be more conservative, at the cost of session-setup
   machinery this module doesn't own. Deriving these nonces instead of transmitting them was tried
-  (see [design decision #1](../../docs/design-decisions.md#1-minimizing-cryptography-overhead)'s
-  TODO list) and reverted; the header case is provably impossible (`hyperchunk_id` only becomes
-  known *by decrypting the header*, so deriving its own nonce from it is circular), and the ack
-  case, while it worked for today's two-field schema, doesn't survive the ack ever growing to carry
-  open-ended data (e.g. a missing-chunk list for selective retransmission, also on that TODO list) —
-  see that entry for the full story of why.
+  (see [memory/rejected-ideas.md](../../memory/rejected-ideas.md)'s header/ack-nonce entry) and
+  reverted; the header case is provably impossible (`hyperchunk_id` only becomes known *by
+  decrypting the header*, so deriving its own nonce from it is circular), and the ack case, while it
+  worked for today's two-field schema, doesn't survive the ack ever growing to carry open-ended data
+  (e.g. a missing-chunk list for selective retransmission, tracked in
+  [`../../TODO.md`](../../TODO.md) D1) — see that entry for the full story of why.
 - The hyperchunk ID solves the two gaps flagged in the previous version of this module: an ack now
   names the hyperchunk it refers to, so `send_hyperchunk` can reject an ack meant for a different
   hyperchunk (stale or cross-session replay), and encrypting the header hides its content from
@@ -114,9 +114,9 @@ _HEADER_CIPHERTEXT_SIZE = Symmetric.nonce_size + HEADER_PLAINTEXT_SIZE + Symmetr
 
 # Seeds the *cosmetic-only* choice of source texture when the header disguise happens to be an
 # image encoding -- deliberately a fixed constant, not derived per-hyperchunk: unlike the payload
-# image (design decision #4), there's no freshness requirement here (nothing about the header
+# image (memory/wire-protocol.md), there's no freshness requirement here (nothing about the header
 # disguise needs to be unpredictable, only consistent), and a per-hyperchunk value would run into
-# the same circularity the header's own nonce already can't escape (see the TODO list entry below).
+# the same circularity the header's own nonce already can't escape (see TODO.md D1).
 _HEADER_DISGUISE_SEED = derive_key(b"airwire-header-disguise-seed", size=Symmetric.nonce_size)
 
 

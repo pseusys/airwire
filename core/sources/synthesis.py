@@ -281,7 +281,7 @@ class ImageEncoding(ChunkEncoding):
     source texture's *seed*, unlike its flavor, needs to vary every call rather than just per
     conversation, so it's derived from `nonce` (the hyperslice's own AEAD nonce, already unique per
     hyperchunk) instead -- real per-message variety at zero extra wire cost, and safe precisely
-    because texture choice was already established to need no confidentiality (design decision #4):
+    because texture choice was already established to need no confidentiality (memory/wire-protocol.md):
     reusing the nonce for this second, unrelated, non-secret purpose doesn't create an AEAD
     nonce-reuse problem, since nothing about AEAD security depends on the nonce being unpredictable
     or single-purpose, only unique -- which it already is.
