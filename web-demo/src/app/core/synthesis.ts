@@ -29,6 +29,19 @@ const MIN_ANCHOR_DISTANCE = 1.1;
 // default; PatchLibrary still supports a smaller stride if ever needed.
 export const DEFAULT_CANDIDATE_STRIDE = DEFAULT_PATCH_SIZE;
 
+// Minimum squared pixel distance (summed over all patchSize*patchSize*3 values) guaranteed
+// between every pair of distinct candidates in a PatchLibrary. Mirrors synthesis.py's
+// MIN_CANDIDATE_DISTANCE_SQ -- see its docstring for why (reaction_diffusion's default library had
+// two candidates differing by a single color unit in a single pixel, nowhere near enough
+// separation for any pixel-level blending to stay decodable).
+export const MIN_CANDIDATE_DISTANCE_SQ = 19200; // ~10 RMS per pixel-channel (out of 255), for an 8x8x3 patch.
+
+// Border width, in pixels, softened at every gap patch's edge by featherCanvas. Mirrors
+// synthesis.py's SEAM_OVERLAP -- see its docstring for why this is a plain linear feather rather
+// than graph-cut seam-finding or Poisson blending (a 1px overlap band leaves neither technique any
+// real room to work with).
+export const SEAM_OVERLAP = 1;
+
 export interface Image {
   readonly width: number;
   readonly height: number;
@@ -70,16 +83,26 @@ function patchKey(patch: Image): string {
   return patch.data.join(',');
 }
 
+function patchCore(patch: Image, overlap: number): Image {
+  return subImage(patch, overlap, overlap, patch.height - 2 * overlap);
+}
+
 /** The candidate palette a source texture is divided into. `stride` (default `patchSize`)
  * reproduces the original non-overlapping tile grid; a smaller stride yields overlapping,
  * pixel-shifted candidates -- see `DEFAULT_CANDIDATE_STRIDE`'s docstring for why that isn't the
- * default. Mirrors `PatchLibrary` in synthesis.py. */
+ * default. `minDistanceSq` additionally rejects any candidate within that squared pixel distance
+ * of an already-accepted one -- not just byte-identical duplicates -- guaranteeing a minimum
+ * separation between every pair of accepted patches, needed before any pixel-level blending can
+ * stay safely decodable (see `MIN_CANDIDATE_DISTANCE_SQ`). Mirrors `PatchLibrary` in
+ * synthesis.py. */
 export class PatchLibrary {
   readonly patchSize: number;
   readonly patches: Image[] = [];
+  readonly patchOrigins: [number, number][] = [];
   private readonly lookup = new Map<string, number>();
+  private readonly coreLookups = new Map<number, Map<string, number>>();
 
-  constructor(texture: Texture, patchSize: number, stride?: number) {
+  constructor(texture: Texture, patchSize: number, stride?: number, minDistanceSq = 0) {
     const size = texture.size;
     if (size % patchSize !== 0) {
       throw new Error(`Texture size must be a multiple of patchSize (${patchSize})!`);
@@ -87,13 +110,23 @@ export class PatchLibrary {
     this.patchSize = patchSize;
     const image: Image = { width: size, height: size, data: texture.data };
     const step = stride ?? patchSize;
+    const accepted: Image[] = [];
+
     for (let row = 0; row < size; row += step) {
       for (let col = 0; col < size; col += step) {
         const patch = periodicExtract(image, row, col, patchSize);
         const key = patchKey(patch);
-        if (this.lookup.has(key)) continue; // flat/repeated regions (e.g. Voronoi cell interiors) can duplicate; skip.
+        if (this.lookup.has(key)) continue; // byte-identical duplicate; always rejected, regardless of minDistanceSq.
+
+        if (minDistanceSq > 0 && accepted.length > 0) {
+          const tooClose = accepted.some((other) => edgeCost(patch.data, other.data) < minDistanceSq);
+          if (tooClose) continue;
+        }
+
         this.lookup.set(key, this.patches.length);
         this.patches.push(patch);
+        this.patchOrigins.push([row, col]);
+        if (minDistanceSq > 0) accepted.push(patch);
       }
     }
     if (this.patches.length < 2) {
@@ -112,14 +145,46 @@ export class PatchLibrary {
     }
     return index;
   }
+
+  /** A key-to-index lookup from each candidate's core (patch content minus an `overlap`-pixel
+   * border on every side) to its index -- built once per `overlap` value and cached. Used by
+   * decode to identify a gap patch whose border may have been softened by `featherCanvas`, without
+   * needing those (deliberately modified) border pixels to match exactly. Throws if two distinct
+   * candidates ever share an identical core: `MIN_CANDIDATE_DISTANCE_SQ` guarantees every pair of
+   * full patches differs, but that's a guarantee about the whole patch, not automatically about a
+   * smaller sub-region -- this is the actual, not assumed, check. Mirrors `core_lookup` in
+   * synthesis.py. */
+  coreLookup(overlap: number): Map<string, number> {
+    const cached = this.coreLookups.get(overlap);
+    if (cached) return cached;
+
+    const lookup = new Map<string, number>();
+    this.patches.forEach((patch, index) => {
+      const key = patchKey(patchCore(patch, overlap));
+      if (lookup.has(key)) {
+        throw new Error(`Patches ${lookup.get(key)} and ${index} share an identical core at overlap=${overlap}; MIN_CANDIDATE_DISTANCE_SQ isn't wide enough for this texture!`);
+      }
+      lookup.set(key, index);
+    });
+    this.coreLookups.set(overlap, lookup);
+    return lookup;
+  }
+
+  indexOfCore(patch: Image, overlap: number): number {
+    const index = this.coreLookup(overlap).get(patchKey(patchCore(patch, overlap)));
+    if (index === undefined) {
+      throw new Error("Patch's core doesn't match any entry in this source texture's patch library!");
+    }
+    return index;
+  }
 }
 
 /** The literal patch this (periodic) texture holds at canvas position (row, col) -- used to
  * render every anchor cell exactly (real content, no bits consumed) and, for the scattered
  * layout's gap cells, as the ground truth candidates are scored against. Wraps modulo the
  * texture's own patch grid, so it's well-defined for a canvas of any height, even past one full
- * texture period. Mirrors `_guide_patch` in synthesis.py. */
-function guidePatch(texture: Texture, row: number, col: number, patchSize: number): Image {
+ * texture period. Mirrors `_guide_patch` in synthesis.py. Exported for tests. */
+export function guidePatch(texture: Texture, row: number, col: number, patchSize: number): Image {
   const rowsPerPeriod = Math.floor(texture.size / patchSize);
   const colsPerPeriod = Math.floor(texture.size / patchSize);
   const image: Image = { width: texture.size, height: texture.size, data: texture.data };
@@ -277,12 +342,104 @@ function rowsToCanvas(rows: Image[][]): Image {
   return { width: canvasWidth, height: canvasHeight, data };
 }
 
-function extractPatchAt(canvas: Image, patchRow: number, patchCol: number, patchSize: number): Image {
+export function extractPatchAt(canvas: Image, patchRow: number, patchCol: number, patchSize: number): Image {
   return subImage(canvas, patchRow * patchSize, patchCol * patchSize, patchSize);
 }
 
+function pixelAt(image: Image, row: number, col: number): [number, number, number] {
+  const base = (row * image.width + col) * 3;
+  return [image.data[base], image.data[base + 1], image.data[base + 2]];
+}
+
+function getPixel(data: Float64Array, width: number, row: number, col: number): [number, number, number] {
+  const base = (row * width + col) * 3;
+  return [data[base], data[base + 1], data[base + 2]];
+}
+
+function setPixel(data: Float64Array, width: number, row: number, col: number, value: [number, number, number]): void {
+  const base = (row * width + col) * 3;
+  data[base] = value[0];
+  data[base + 1] = value[1];
+  data[base + 2] = value[2];
+}
+
+/** Softens the hard edge at every boundary that touches at least one gap patch, by linearly
+ * cross-fading an `overlap`-pixel-wide band on the gap side(s) of that boundary toward the
+ * neighbor's own nearest edge pixels. Anchors are never modified -- only a gap patch's own outer
+ * border is touched, and only that far, so decode's exact match on the interior (core) region is
+ * unaffected by this pass regardless of how visible the untreated boundary would otherwise be.
+ * Every gap patch gets every one of its internal edges treated the same way, uniformly, so decode
+ * doesn't need to know which specific neighbors were anchors versus gaps -- it just always reads
+ * the core. Corners (touched by both an edge blend and its neighboring perpendicular blend) get a
+ * small compounding effect, an accepted simplification for this first, deliberately thin pass.
+ * Mirrors `_feather_canvas` in synthesis.py. Exported for tests. */
+export function featherCanvas(canvas: Image, mask: boolean[][], patchSize: number, overlap: number): Image {
+  const totalRows = Math.floor(canvas.height / patchSize);
+  const canvasWidth = Math.floor(canvas.width / patchSize);
+  const blended = Float64Array.from(canvas.data);
+
+  const mix = (own: [number, number, number], neighbor: [number, number, number], weight: number): [number, number, number] => [
+    own[0] * (1 - weight) + neighbor[0] * weight,
+    own[1] * (1 - weight) + neighbor[1] * weight,
+    own[2] * (1 - weight) + neighbor[2] * weight,
+  ];
+
+  for (let row = 0; row < totalRows; row++) {
+    for (let col = 0; col < canvasWidth - 1; col++) {
+      const leftIsAnchor = isAnchor(mask, row, col);
+      const rightIsAnchor = isAnchor(mask, row, col + 1);
+      if (leftIsAnchor && rightIsAnchor) continue;
+      const r0 = row * patchSize;
+      for (let dy = 0; dy < patchSize; dy++) {
+        const r = r0 + dy;
+        const leftEdge = pixelAt(canvas, r, col * patchSize + patchSize - 1);
+        const rightEdge = pixelAt(canvas, r, (col + 1) * patchSize);
+        for (let offset = 0; offset < overlap; offset++) {
+          const weight = (offset + 1) / (overlap + 1);
+          if (!leftIsAnchor) {
+            const c = col * patchSize + patchSize - overlap + offset;
+            setPixel(blended, canvas.width, r, c, mix(pixelAt(canvas, r, c), rightEdge, weight));
+          }
+          if (!rightIsAnchor) {
+            const c = (col + 1) * patchSize + (overlap - 1 - offset);
+            setPixel(blended, canvas.width, r, c, mix(pixelAt(canvas, r, c), leftEdge, weight));
+          }
+        }
+      }
+    }
+  }
+
+  for (let row = 0; row < totalRows - 1; row++) {
+    for (let col = 0; col < canvasWidth; col++) {
+      const topIsAnchor = isAnchor(mask, row, col);
+      const bottomIsAnchor = isAnchor(mask, row + 1, col);
+      if (topIsAnchor && bottomIsAnchor) continue;
+      const c0 = col * patchSize;
+      for (let dx = 0; dx < patchSize; dx++) {
+        const c = c0 + dx;
+        const topEdge = pixelAt(canvas, row * patchSize + patchSize - 1, c);
+        const bottomEdge = pixelAt(canvas, (row + 1) * patchSize, c);
+        for (let offset = 0; offset < overlap; offset++) {
+          const weight = (offset + 1) / (overlap + 1);
+          if (!topIsAnchor) {
+            const r = row * patchSize + patchSize - overlap + offset;
+            setPixel(blended, canvas.width, r, c, mix(getPixel(blended, canvas.width, r, c), bottomEdge, weight));
+          }
+          if (!bottomIsAnchor) {
+            const r = (row + 1) * patchSize + (overlap - 1 - offset);
+            setPixel(blended, canvas.width, r, c, mix(getPixel(blended, canvas.width, r, c), topEdge, weight));
+          }
+        }
+      }
+    }
+  }
+
+  const data = Uint8Array.from(blended.map((value) => Math.max(0, Math.min(255, Math.round(value)))));
+  return { width: canvas.width, height: canvas.height, data };
+}
+
 function encodeScattered(data: Uint8Array, texture: Texture, patchSize: number, canvasWidth: number): Image {
-  const library = new PatchLibrary(texture, patchSize, DEFAULT_CANDIDATE_STRIDE);
+  const library = new PatchLibrary(texture, patchSize, DEFAULT_CANDIDATE_STRIDE, MIN_CANDIDATE_DISTANCE_SQ);
   const period = Math.floor(texture.size / patchSize);
   const mask = anchorMask(maskSeed(texture), period);
   const cursor = new BitCursor(data);
@@ -343,11 +500,12 @@ function encodeScattered(data: Uint8Array, texture: Texture, patchSize: number, 
     if (cursor.remaining() <= 0) break;
   }
 
-  return rowsToCanvas(rows);
+  const canvas = rowsToCanvas(rows);
+  return featherCanvas(canvas, mask, patchSize, SEAM_OVERLAP);
 }
 
 function decodeScattered(canvas: Image, texture: Texture, length: number, patchSize: number): Uint8Array {
-  const library = new PatchLibrary(texture, patchSize, DEFAULT_CANDIDATE_STRIDE);
+  const library = new PatchLibrary(texture, patchSize, DEFAULT_CANDIDATE_STRIDE, MIN_CANDIDATE_DISTANCE_SQ);
   const canvasWidth = Math.floor(canvas.width / patchSize);
   const totalRows = Math.floor(canvas.height / patchSize);
   const period = Math.floor(texture.size / patchSize);
@@ -362,10 +520,22 @@ function decodeScattered(canvas: Image, texture: Texture, length: number, patchS
   for (let rowIndex = 0; rowIndex < totalRows; rowIndex++) {
     const rowPatches: Image[] = [];
     for (let col = 0; col < canvasWidth; col++) {
-      const patch = extractPatchAt(canvas, rowIndex, col, patchSize);
-      rowPatches.push(patch);
+      const rawPatch = extractPatchAt(canvas, rowIndex, col, patchSize);
 
-      if (isAnchor(mask, rowIndex, col) || accumulator.done()) continue;
+      if (isAnchor(mask, rowIndex, col)) {
+        rowPatches.push(rawPatch); // anchors are never touched by feathering; exact already.
+        continue;
+      }
+
+      // Gap patches may have had their border softened by featherCanvas, so identify them by
+      // their (untouched) core -- then use the library's pristine copy, not the raw (possibly
+      // blended) canvas pixels, for every later cell's above/left reference, so decode's scoring
+      // stays bit-for-bit consistent with what encode actually used.
+      const actualIndex = library.indexOfCore(rawPatch, SEAM_OVERLAP);
+      const resolvedPatch = library.patches[actualIndex];
+      rowPatches.push(resolvedPatch);
+
+      if (accumulator.done()) continue;
 
       const above = rowIndex > 0 ? rows[rowIndex - 1][col] : null;
       const left = col > 0 ? rowPatches[col - 1] : null;
@@ -374,7 +544,6 @@ function decodeScattered(canvas: Image, texture: Texture, length: number, patchS
       low = newLow;
       high = newHigh;
       width = newWidth;
-      const actualIndex = library.indexOf(patch);
       const match = ranges.find(([index]) => index === actualIndex);
       if (!match) {
         throw new Error(`Patch at (row=${rowIndex}, col=${col}) is not a valid candidate at this point in the synthesis walk!`);

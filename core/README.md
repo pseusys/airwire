@@ -98,9 +98,14 @@ Those scores become the arithmetic coder's weights,
 4. Growth continues until the ciphertext is exhausted; any leftover space in the row in progress
    is padded with the single best-matching patch, which costs no bits at all — purely to keep the
    image rectangular.
-5. **Decoding** walks the same positions in the same order, recomputes the same scores from each
-   gap patch's already-resolved neighbors, looks up which patch is actually sitting there, and
-   inverts the arithmetic step exactly as the text decoder does.
+5. Once the whole canvas is decided, a final pass softens the hard edge at every gap patch's own
+   border (currently 1 pixel wide) by blending it toward its neighbor's nearest pixels — anchors
+   are never touched, and only that outer border, never a patch's interior, so this never affects
+   which bits get recovered.
+6. **Decoding** walks the same positions in the same order, recomputes the same scores from each
+   gap patch's already-resolved neighbors, identifies which patch is actually sitting there from
+   its untouched interior (ignoring the deliberately-softened border), and inverts the arithmetic
+   step exactly as the text decoder does.
 
 This is a deliberately simplified adaptation of a real, non-neural 2015 steganography technique
 (Wu & Wang's "reversible texture synthesis") — see
@@ -206,9 +211,10 @@ Generated, not committed
 Visual quality
   is still a prototype-stage tradeoff -- see
   [`memory/wire-protocol.md`](../memory/wire-protocol.md)
-  (gap patches are scored against the texture's true content at that exact position, and anchors
-  sit at scattered 2-D positions instead of whole rows, for three of the four flavors; `attractor`
-  has no positional structure to exploit and keeps the original row layout and edge-only scoring).
+  (gap patches are scored against the texture's true content at that exact position, anchors sit
+  at scattered 2-D positions instead of whole rows, and each gap patch's own border is softened
+  against its neighbors, for three of the four flavors; `attractor` has no positional structure to
+  exploit and keeps the original row layout, edge-only scoring, and unsoftened borders).
 
 ## CI
 

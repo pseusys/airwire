@@ -59,8 +59,11 @@ def test_decode_rejects_a_patch_not_in_the_library(texture: np.ndarray) -> None:
     total_rows = canvas.shape[0] // synthesis.DEFAULT_PATCH_SIZE
     row, col = next((r, c) for r in range(total_rows) for c in range(synthesis.DEFAULT_CANVAS_WIDTH) if not synthesis._is_anchor(mask, r, c))
 
+    # Corrupt a pixel in the patch's core (not its outer SEAM_OVERLAP-pixel border, which
+    # _feather_canvas deliberately modifies and decode deliberately ignores when matching).
     r0, c0 = row * synthesis.DEFAULT_PATCH_SIZE, col * synthesis.DEFAULT_PATCH_SIZE
-    tampered[r0, c0, 0] ^= 0xFF
+    center = synthesis.DEFAULT_PATCH_SIZE // 2
+    tampered[r0 + center, c0 + center, 0] ^= 0xFF
     with pytest.raises(ValueError):
         synthesis.decode(tampered, texture, len(data))
 
@@ -106,6 +109,77 @@ def test_patch_library_rejects_too_uniform_a_texture() -> None:
     flat = np.full((32, 32, 3), 128, dtype=np.uint8)
     with pytest.raises(ValueError):
         synthesis.PatchLibrary(flat, patch_size=8)
+
+
+def test_patch_library_min_distance_sq_shrinks_the_library(texture: np.ndarray) -> None:
+    unconstrained = synthesis.PatchLibrary(texture, synthesis.DEFAULT_PATCH_SIZE)
+    constrained = synthesis.PatchLibrary(texture, synthesis.DEFAULT_PATCH_SIZE, min_distance_sq=synthesis.MIN_CANDIDATE_DISTANCE_SQ)
+    assert len(constrained) <= len(unconstrained)
+    assert len(constrained) >= 2
+
+
+def test_patch_library_min_distance_sq_guarantees_separation(texture: np.ndarray) -> None:
+    library = synthesis.PatchLibrary(texture, synthesis.DEFAULT_PATCH_SIZE, min_distance_sq=synthesis.MIN_CANDIDATE_DISTANCE_SQ)
+    patches = library.patches_array.astype(np.int64)
+    for i in range(len(patches)):
+        for j in range(i + 1, len(patches)):
+            distance_sq = int(np.sum((patches[i] - patches[j]) ** 2))
+            assert distance_sq >= synthesis.MIN_CANDIDATE_DISTANCE_SQ
+
+
+def test_patch_library_tracks_patch_origins(texture: np.ndarray) -> None:
+    library = synthesis.PatchLibrary(texture, synthesis.DEFAULT_PATCH_SIZE)
+    assert len(library.patch_origins) == len(library.patches)
+    for (row, col), patch in zip(library.patch_origins, library.patches):
+        assert np.array_equal(synthesis._periodic_extract(texture, row, col, synthesis.DEFAULT_PATCH_SIZE), patch)
+
+
+def test_patch_library_index_of_core_matches_full_index(texture: np.ndarray) -> None:
+    library = synthesis.PatchLibrary(texture, synthesis.DEFAULT_PATCH_SIZE, min_distance_sq=synthesis.MIN_CANDIDATE_DISTANCE_SQ)
+    for index, patch in enumerate(library.patches):
+        assert library.index_of_core(patch, synthesis.SEAM_OVERLAP) == index
+
+
+def test_patch_library_index_of_core_rejects_unknown_core(texture: np.ndarray) -> None:
+    library = synthesis.PatchLibrary(texture, synthesis.DEFAULT_PATCH_SIZE, min_distance_sq=synthesis.MIN_CANDIDATE_DISTANCE_SQ)
+    bogus = np.zeros((synthesis.DEFAULT_PATCH_SIZE, synthesis.DEFAULT_PATCH_SIZE, 3), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        library.index_of_core(bogus, synthesis.SEAM_OVERLAP)
+
+
+def test_feather_canvas_never_modifies_anchor_pixels(texture: np.ndarray) -> None:
+    canvas = synthesis.encode(token_bytes(80), texture)
+    period = texture.shape[1] // synthesis.DEFAULT_PATCH_SIZE
+    mask = synthesis._anchor_mask(synthesis._mask_seed(texture), period, synthesis.MIN_ANCHOR_DISTANCE)
+    total_rows = canvas.shape[0] // synthesis.DEFAULT_PATCH_SIZE
+    for row in range(total_rows):
+        for col in range(synthesis.DEFAULT_CANVAS_WIDTH):
+            if not synthesis._is_anchor(mask, row, col):
+                continue
+            actual = synthesis._extract_patch(canvas, row, col, synthesis.DEFAULT_PATCH_SIZE)
+            expected = synthesis._guide_patch(texture, row, col, synthesis.DEFAULT_PATCH_SIZE)
+            assert np.array_equal(actual, expected)
+
+
+def test_feather_canvas_softens_at_least_one_gap_to_gap_boundary(texture: np.ndarray) -> None:
+    # Not every boundary is guaranteed to change (two adjacent patches could coincidentally
+    # already agree at their shared edge), but across a large-enough canvas at least one should.
+    canvas = synthesis.encode(token_bytes(400), texture)
+    library = synthesis.PatchLibrary(texture, synthesis.DEFAULT_PATCH_SIZE, min_distance_sq=synthesis.MIN_CANDIDATE_DISTANCE_SQ)
+    period = texture.shape[1] // synthesis.DEFAULT_PATCH_SIZE
+    mask = synthesis._anchor_mask(synthesis._mask_seed(texture), period, synthesis.MIN_ANCHOR_DISTANCE)
+    total_rows = canvas.shape[0] // synthesis.DEFAULT_PATCH_SIZE
+
+    changed = False
+    for row in range(total_rows):
+        for col in range(synthesis.DEFAULT_CANVAS_WIDTH):
+            if synthesis._is_anchor(mask, row, col):
+                continue
+            actual = synthesis._extract_patch(canvas, row, col, synthesis.DEFAULT_PATCH_SIZE)
+            index = library.index_of_core(actual, synthesis.SEAM_OVERLAP)
+            if not np.array_equal(actual, library.patches[index]):
+                changed = True
+    assert changed
 
 
 def test_svg_export_contains_expected_structure(texture: np.ndarray) -> None:

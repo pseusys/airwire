@@ -1,4 +1,19 @@
-import { anchorMask, decode, DEFAULT_CANVAS_WIDTH, DEFAULT_PATCH_SIZE, DEFAULT_TEXTURE_SIZE, encode, Image, isAnchor, maskSeed } from './synthesis';
+import {
+  anchorMask,
+  decode,
+  DEFAULT_CANVAS_WIDTH,
+  DEFAULT_PATCH_SIZE,
+  DEFAULT_TEXTURE_SIZE,
+  encode,
+  extractPatchAt,
+  guidePatch,
+  Image,
+  isAnchor,
+  maskSeed,
+  MIN_CANDIDATE_DISTANCE_SQ,
+  PatchLibrary,
+  SEAM_OVERLAP,
+} from './synthesis';
 import { reactionDiffusion, textureByName, TextureFlavor, valueNoise, voronoi } from './textures';
 
 // Small enough to keep the patch library modest and tests fast, large enough (with patchSize=8)
@@ -63,13 +78,111 @@ describe('image steganography: encode/decode round trip', () => {
       }
     }
 
+    // Corrupt a pixel in the patch's core (not its outer SEAM_OVERLAP-pixel border, which
+    // featherCanvas deliberately modifies and decode deliberately ignores when matching).
     const tampered: Image = { width: canvas.width, height: canvas.height, data: new Uint8Array(canvas.data) };
-    const pixelIndex = (row * DEFAULT_PATCH_SIZE * canvas.width + col * DEFAULT_PATCH_SIZE) * 3;
+    const center = Math.floor(DEFAULT_PATCH_SIZE / 2);
+    const pixelIndex = ((row * DEFAULT_PATCH_SIZE + center) * canvas.width + (col * DEFAULT_PATCH_SIZE + center)) * 3;
     tampered.data[pixelIndex] = (tampered.data[pixelIndex] + 128) % 256;
 
     expect(() => decode(tampered, texture, data.length)).toThrow();
   });
 });
+
+describe('PatchLibrary minDistanceSq', () => {
+  it('shrinks the library, never below 2 candidates', () => {
+    const texture = valueNoise(TEXTURE_SIZE, 6);
+    const unconstrained = new PatchLibrary(texture, DEFAULT_PATCH_SIZE);
+    const constrained = new PatchLibrary(texture, DEFAULT_PATCH_SIZE, undefined, MIN_CANDIDATE_DISTANCE_SQ);
+    expect(constrained.length).toBeLessThanOrEqual(unconstrained.length);
+    expect(constrained.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('guarantees separation between every pair of accepted patches', () => {
+    const texture = valueNoise(TEXTURE_SIZE, 6);
+    const library = new PatchLibrary(texture, DEFAULT_PATCH_SIZE, undefined, MIN_CANDIDATE_DISTANCE_SQ);
+    for (let i = 0; i < library.patches.length; i++) {
+      for (let j = i + 1; j < library.patches.length; j++) {
+        let distanceSq = 0;
+        for (let k = 0; k < library.patches[i].data.length; k++) {
+          const diff = library.patches[i].data[k] - library.patches[j].data[k];
+          distanceSq += diff * diff;
+        }
+        expect(distanceSq).toBeGreaterThanOrEqual(MIN_CANDIDATE_DISTANCE_SQ);
+      }
+    }
+  });
+
+  it('tracks each patch origin, consistent with the periodic texture', () => {
+    const texture = valueNoise(TEXTURE_SIZE, 6);
+    const library = new PatchLibrary(texture, DEFAULT_PATCH_SIZE);
+    expect(library.patchOrigins.length).toBe(library.patches.length);
+  });
+});
+
+describe('PatchLibrary.indexOfCore', () => {
+  it('matches the full index for every library patch', () => {
+    const texture = valueNoise(TEXTURE_SIZE, 6);
+    const library = new PatchLibrary(texture, DEFAULT_PATCH_SIZE, undefined, MIN_CANDIDATE_DISTANCE_SQ);
+    library.patches.forEach((patch, index) => {
+      expect(library.indexOfCore(patch, SEAM_OVERLAP)).toBe(index);
+    });
+  });
+
+  it('rejects an unknown core', () => {
+    const texture = valueNoise(TEXTURE_SIZE, 6);
+    const library = new PatchLibrary(texture, DEFAULT_PATCH_SIZE, undefined, MIN_CANDIDATE_DISTANCE_SQ);
+    const bogus: Image = { width: DEFAULT_PATCH_SIZE, height: DEFAULT_PATCH_SIZE, data: new Uint8Array(DEFAULT_PATCH_SIZE * DEFAULT_PATCH_SIZE * 3) };
+    expect(() => library.indexOfCore(bogus, SEAM_OVERLAP)).toThrow();
+  });
+});
+
+describe('featherCanvas', () => {
+  it('never modifies anchor pixels', () => {
+    const texture = valueNoise(TEXTURE_SIZE, 6);
+    const canvas = encode(crypto.getRandomValues(new Uint8Array(80)), texture);
+    const period = Math.floor(texture.size / DEFAULT_PATCH_SIZE);
+    const mask = anchorMask(maskSeed(texture), period);
+    const totalRows = canvas.height / DEFAULT_PATCH_SIZE;
+
+    for (let row = 0; row < totalRows; row++) {
+      for (let col = 0; col < DEFAULT_CANVAS_WIDTH; col++) {
+        if (!isAnchor(mask, row, col)) continue;
+        const actual = extractPatchAt(canvas, row, col, DEFAULT_PATCH_SIZE);
+        const expected = guidePatch(texture, row, col, DEFAULT_PATCH_SIZE);
+        expect(actual.data).toEqual(expected.data);
+      }
+    }
+  });
+
+  it('softens at least one gap-to-gap boundary across a large-enough canvas', () => {
+    const texture = valueNoise(TEXTURE_SIZE, 6);
+    const canvas = encode(crypto.getRandomValues(new Uint8Array(400)), texture);
+    const library = new PatchLibrary(texture, DEFAULT_PATCH_SIZE, undefined, MIN_CANDIDATE_DISTANCE_SQ);
+    const period = Math.floor(texture.size / DEFAULT_PATCH_SIZE);
+    const mask = anchorMask(maskSeed(texture), period);
+    const totalRows = canvas.height / DEFAULT_PATCH_SIZE;
+
+    let changed = false;
+    for (let row = 0; row < totalRows; row++) {
+      for (let col = 0; col < DEFAULT_CANVAS_WIDTH; col++) {
+        if (isAnchor(mask, row, col)) continue;
+        const actual = extractPatchAt(canvas, row, col, DEFAULT_PATCH_SIZE);
+        const index = library.indexOfCore(actual, SEAM_OVERLAP);
+        if (!arraysEqual(actual.data, library.patches[index].data)) changed = true;
+      }
+    }
+    expect(changed).toBeTrue();
+  });
+});
+
+function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
 
 describe('anchorMask', () => {
   it('is deterministic and periodic', () => {

@@ -139,8 +139,18 @@ Two layout mechanisms exist, chosen per flavor
 `PatchLibrary` also supports
   overlapping, pixel-shifted candidates (`stride` parameter) — measured and not adopted as the
   default, see `memory/rejected-ideas.md`.
-See the two 2026-09-09 entries in
-  [`../CHANGELOG.md`](../CHANGELOG.md) for the before/after measurements of both changes.
+Once the whole canvas is decided, `_feather_canvas`
+  softens the hard edge at every gap patch's own border (`SEAM_OVERLAP` pixels, currently 1) by
+  linearly cross-fading it toward each neighbor's nearest edge pixels — confined strictly to that
+  border, never the interior, so decode's exact match on the untouched core
+  (`PatchLibrary.index_of_core`) recovers the original choice regardless of blend strength.
+This
+  needed `PatchLibrary` to widen its dedup from exact-byte-match to a guaranteed minimum pixel
+  distance (`min_distance_sq`) between every pair of accepted candidates first — see
+  `MIN_CANDIDATE_DISTANCE_SQ`'s docstring for why (`reaction_diffusion`'s default library had two
+  candidates one color unit apart in a single pixel).
+See the three 2026-09-09/10 entries in
+  [`../CHANGELOG.md`](../CHANGELOG.md) for the before/after measurements of all three changes.
 - **`core/sources/handshake.py`** — see [`handshake.md`](handshake.md).
 
 ## Tunables
@@ -158,4 +168,6 @@ See the two 2026-09-09 entries in
 | `DEFAULT_CANVAS_WIDTH` | 16 | `synthesis.py` | Synthesized canvas width, in patches. |
 | `MIN_ANCHOR_DISTANCE` | 1.1 | `synthesis.py` | Minimum toroidal grid distance between scattered anchors; excludes only orthogonally-adjacent cells, the natural maximal blue-noise packing density (~36-39%). |
 | `DEFAULT_CANDIDATE_STRIDE` | `DEFAULT_PATCH_SIZE` (8) | `synthesis.py` | `PatchLibrary` candidate spacing; non-overlapping by default — see `memory/rejected-ideas.md` for why a smaller stride wasn't adopted. |
+| `MIN_CANDIDATE_DISTANCE_SQ` | 19200 | `synthesis.py` | Minimum squared pixel distance guaranteed between every pair of `PatchLibrary` candidates (~10 RMS per pixel-channel) — needed before any border blending stays safely decodable. |
+| `SEAM_OVERLAP` | 1 | `synthesis.py` | Border width, in pixels, softened by `_feather_canvas` at each gap patch's edge — kept thin because the core-region safety margin is already thin for `voronoi`/`reaction_diffusion` at this width. |
 | `_FILLER_SEED_SIZE` | 4 | `markov.py` | Byte size of every derived Markov filler/permutation seed. |

@@ -43,6 +43,91 @@ entry of the new cycle.
 
 ---
 
+## 2026-09-10 — Image disguise patch borders softened by feathering, on a widened-dedup candidate library
+
+*keywords: MIN_CANDIDATE_DISTANCE_SQ, SEAM_OVERLAP, _feather_canvas, index_of_core, core_lookup, patch_origins*
+
+**Generated real sample images via `poetry poe demo` and looked closely: even with the row-banding
+and large-scale-fragmentation problems already fixed, individual patches still visibly mismatch
+their neighbors at the pixel level -- a grid of independently-chosen tiles, not one continuous
+image.** Researched the literature for how patch-based texture synthesis normally hides this
+(graph-cut seams, Poisson/gradient-domain blending -- Kwatra et al., Pérez et al., already this
+project's own cited prior art via Efros & Freeman's image quilting), and identified the actual
+unlock: blending only ever needs to touch a thin border band near each patch's edges, so decode can
+keep doing **exact match on a shrunk core region** (excluding that border) rather than needing
+fuzzy whole-patch matching.
+
+**What changed in the code, two ordered phases.**
+
+**Phase 1 (widened dedup):** `PatchLibrary` gained `min_distance_sq`, rejecting any candidate
+within that squared pixel distance of an already-accepted one, not just byte-identical duplicates
+-- guaranteeing a minimum separation between every pair of accepted patches
+(`MIN_CANDIDATE_DISTANCE_SQ = 19200`, ~10 RMS per pixel-channel).
+Measured directly: `value_noise`'s
+256-patch library barely shrinks; `voronoi`'s shrinks ~6% (256 → 240); `reaction_diffusion`'s
+shrinks ~51% (168 → 82) -- it was mostly two-tone, and its default library had two candidates
+differing by a single color unit in a single pixel, nowhere near enough separation for any
+pixel-level blending.
+`PatchLibrary` also now tracks each accepted patch's source texture offset
+(`patch_origins`).
+Fully backward-compatible on its own: encode still renders literal patch
+content, so exact-match decode kept working unchanged through this phase.
+
+**Phase 2 (border feathering):** re-verified the minimum-distance guarantee specifically over the
+*core* (patch content minus a border) before writing any blending code -- it survives fine for
+`value_noise` (~9-12.6 RMS even at a 2px border) but is thin for `voronoi` (~2.3 RMS at 1px) and
+nearly gone for `reaction_diffusion` (~1.6 RMS at 1px, ~0.2 at 2px, unusable).
+Chose a uniform 1px
+border (`SEAM_OVERLAP = 1`) across all three flavors rather than special-casing per flavor.
+Graph-cut seam-finding and Poisson blending were scoped and rejected before implementation once
+the numbers showed a 1px overlap band leaves neither technique room to show its real advantage --
+see `memory/rejected-ideas.md`'s new entry.
+Shipped plain linear feathering instead
+(`_feather_canvas`): cross-fades each gap patch's own border toward its neighbor's nearest edge
+pixels, anchors never touched, confined strictly to the border so the interior stays exact.
+`PatchLibrary.index_of_core`/`core_lookup` let decode identify a (border-softened) gap patch by its
+untouched core alone -- raising if two distinct candidates ever turn out to share an identical
+core, a real check, not an assumption.
+Decode now resolves each gap cell to the library's pristine
+copy immediately (not the raw, possibly-blended canvas pixels), so later cells' above/left scoring
+stays bit-for-bit consistent with what encode used.
+
+**What was measured.**
+Round-trip correctness confirmed across 10 seeds x 3 flavors (30/30) plus
+the full parametrized test suite; wall-clock cost negligible (<1s per message).
+Visual comparison
+done properly this time -- an *isolated* pre/post-feathering pair built from the identical
+underlying patch choices (not a comparison against images generated before Phase 1's dedup change,
+which would have conflated two different effects): `value_noise` and `voronoi` show a real,
+visible softening of patch edges; `reaction_diffusion` shows almost no visible change, consistent
+with its much tighter margin forcing an especially conservative blend.
+
+**What it means, and what was decided.**
+Kept, for all three position-guided flavors; `attractor`
+untouched (own code path, as always).
+This is a real, if modest, improvement -- not the
+"continuously smooth, no grid at all" result graph-cut/Poisson blending might have delivered with
+more overlap room, but a genuine step past the two-file redesign from the day before, at a
+complexity and risk level the actual safety margins could support.
+See
+`docs/superpowers/specs/2026-09-10-smooth-canvas-blending-design.md` for the full design.
+
+**Ported to `web-demo/` the same day.**
+`web-demo/src/app/core/synthesis.ts` mirrors both phases:
+`PatchLibrary` gained `minDistanceSq` (`MIN_CANDIDATE_DISTANCE_SQ`, same value) and `patchOrigins`;
+`featherCanvas` mirrors `_feather_canvas` exactly (same core/border split, same weight formula);
+`PatchLibrary.indexOfCore`/`coreLookup` mirror the Python methods, including the same
+share-an-identical-core guard.
+The existing tampering test was fixed the same way as the Python
+one (corrupts the patch's center pixel now, not its corner, which the border pass legitimately
+touches).
+14 new Karma tests (minDistanceSq shrinkage/separation, `indexOfCore`, `featherCanvas`
+anchor-preservation and boundary-softening); all 74 tests and `ng lint` pass.
+Verified live in a
+browser (build, static serve, Playwright against system Chrome): all four flavors reveal
+correctly, and the softened edges are visible in `value_noise`/`voronoi`, matching the Python
+screenshots.
+
 ## 2026-09-09 — Image disguise's seed/gap rows replaced by a scattered 2-D anchor layout, removing the row-banding look
 
 *keywords: _anchor_mask, MIN_ANCHOR_DISTANCE, scattered layout, Poisson disk, DEFAULT_CANDIDATE_STRIDE, Wu Wang scatter*

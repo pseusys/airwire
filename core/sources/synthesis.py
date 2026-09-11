@@ -30,13 +30,21 @@ Gap cells are filled one patch at a time, in a plain row-major raster
   a real, working, still-available option.
 The scattered placement itself is what removes the
   banding; see the 2026-09-09 CHANGELOG.md entries for the before/after evidence.
+Once the whole
+  canvas is decided, `_feather_canvas` softens the hard edge at every gap patch's own border
+  (`SEAM_OVERLAP` pixels wide) by linearly cross-fading it toward each neighbor's nearest edge --
+  confined strictly to that border, never the patch's interior, so decode's exact match on the
+  untouched core (`PatchLibrary.index_of_core`) recovers the original choice regardless of blend
+  strength.
+See `SEAM_OVERLAP`'s docstring for why this is a plain linear feather rather than the
+  graph-cut/Poisson techniques the literature actually recommends for this problem.
 - **Row-alternating layout** (`attractor` only): the original mechanism -- alternating seed rows
   (whole, untouched patches, one full row at a time) and gap rows (filled one patch at a time,
   scored only against the seed rows immediately above/below and the already-chosen patch to the
   left).
 `attractor` has no exploitable 2-D positional structure to place scattered anchors by (a
   sparse chaotic-orbit density histogram, not a spatially periodic field -- confirmed by direct
-  tiling tests), so it stays on this simpler, already-adequate mechanism.
+  tiling tests), so it stays on this simpler, already-adequate mechanism, unaffected by feathering.
 
 Match quality (sum of squared pixel differences) becomes an integer weight -- exact integer
 arithmetic throughout, never floating point, for the same reason `sources/markov.py` avoids it:
@@ -51,6 +59,11 @@ Known limitations, worth a second look independently of this module:
   still visibly mismatch its neighbors even with the position-guided target term -- the scattered
   layout spreads this over the whole canvas instead of confining it to alternating rows, which is
   a real improvement, but doesn't make each individual gap cell's match any better than before.
+- `_feather_canvas`'s border is deliberately thin (`SEAM_OVERLAP=1`): the safety margin that
+  survives once a border is excluded from candidate matching is already thin for
+  `voronoi`/`reaction_diffusion` at 1px and unusable by 2px, so there isn't currently room for a
+  wider, more visually effective blend on those two flavors without first finding a way to widen
+  that margin (e.g. a stricter, per-flavor `MIN_CANDIDATE_DISTANCE_SQ`).
 """
 
 import base64
@@ -89,34 +102,69 @@ MIN_ANCHOR_DISTANCE = 1.1
 # See memory/rejected-ideas.md's "Overlapping candidate patches" entry for the full measurements.
 DEFAULT_CANDIDATE_STRIDE = DEFAULT_PATCH_SIZE
 
+# Minimum squared pixel distance (summed over all patch_size*patch_size*3 values) guaranteed
+# between every pair of distinct candidates in a PatchLibrary -- see MIN_CANDIDATE_DISTANCE_SQ's
+# use in PatchLibrary below. Measured per flavor before picking this: reaction_diffusion's default
+# (exact-dedup-only) library had two candidates differing by a single color unit in a single
+# pixel -- nowhere near enough separation for any pixel-level blending to stay decodable. See the
+# 2026-09-10 CHANGELOG.md entry for the measured library-size trade-off this threshold costs.
+MIN_CANDIDATE_DISTANCE_SQ = 19200  # ~10 RMS per pixel-channel (out of 255), for an 8x8x3 patch.
+
+# Border width, in pixels, softened at every gap patch's edge by _feather_canvas. Kept
+# intentionally thin: re-measuring the minimum-distance guarantee over just the core (patch
+# content minus this border) showed it's already thin for voronoi/reaction_diffusion at 1px, and
+# collapses entirely by 2px -- see the 2026-09-10 CHANGELOG.md entry. Plain linear feathering was
+# chosen over graph-cut seam-finding or Poisson blending because a 1px overlap band leaves neither
+# technique any real room to route a seam or blend a gradient through -- their usual advantage
+# needs a much wider overlap than the safety numbers allow here.
+SEAM_OVERLAP = 1
+
 
 class PatchLibrary:
     """The candidate palette a source texture is divided into. `stride=patch_size` (the default)
-    reproduces the original non-overlapping tile grid; a smaller stride yields overlapping,
-    pixel-shifted candidates -- a much finer-grained palette, at the cost of a bigger library to
-    build and score."""
+        reproduces the original non-overlapping tile grid; a smaller stride yields overlapping,
+        pixel-shifted candidates -- a much finer-grained palette, at the cost of a bigger library to
+        build and score.
+    `min_distance_sq` additionally rejects any candidate within that squared pixel
+        distance of an already-accepted one -- not just byte-identical duplicates -- guaranteeing a
+        minimum separation between every pair of accepted patches, needed before any pixel-level
+        blending can stay safely decodable (see `MIN_CANDIDATE_DISTANCE_SQ`)."""
 
-    def __init__(self, texture: np.ndarray, patch_size: int, stride: Optional[int] = None) -> None:
+    def __init__(self, texture: np.ndarray, patch_size: int, stride: Optional[int] = None, min_distance_sq: float = 0.0) -> None:
         size = texture.shape[0]
         if texture.shape[0] != texture.shape[1] or size % patch_size != 0:
             raise ValueError(f"Texture must be square with a side length that's a multiple of patch_size ({patch_size})!")
 
         self.patch_size = patch_size
         self.patches: List[np.ndarray] = []
+        self.patch_origins: List[Tuple[int, int]] = []
         lookup: Dict[bytes, int] = {}
+        accepted_i64: List[np.ndarray] = []
+
         for row in range(0, size, stride or patch_size):
             for col in range(0, size, stride or patch_size):
                 patch = _periodic_extract(texture, row, col, patch_size)
                 key = patch.tobytes()
                 if key in lookup:
-                    continue  # flat/repeated regions, or overlapping crops that coincide; skip.
+                    continue  # byte-identical duplicate; always rejected, regardless of min_distance_sq.
+
+                if min_distance_sq > 0 and accepted_i64:
+                    candidate_i64 = patch.astype(np.int64)
+                    too_close = any(np.sum((candidate_i64 - other) ** 2) < min_distance_sq for other in accepted_i64)
+                    if too_close:
+                        continue
+
                 lookup[key] = len(self.patches)
                 self.patches.append(patch)
+                self.patch_origins.append((row, col))
+                if min_distance_sq > 0:
+                    accepted_i64.append(patch.astype(np.int64))
 
         if len(self.patches) < 2:
             raise ValueError("Source texture yields fewer than 2 distinct patches; pick a larger or more varied texture!")
         self._lookup = lookup
         self.patches_array = np.stack(self.patches)  # (N, patch_size, patch_size, 3) uint8, for vectorized scoring.
+        self._core_lookups: Dict[int, Dict[bytes, int]] = {}
 
     def __len__(self) -> int:
         return len(self.patches)
@@ -126,6 +174,39 @@ class PatchLibrary:
             return self._lookup[patch.tobytes()]
         except KeyError:
             raise ValueError("Patch doesn't match any entry in this source texture's patch library!") from None
+
+    def _core(self, patch: np.ndarray, overlap: int) -> np.ndarray:
+        return patch[overlap : self.patch_size - overlap, overlap : self.patch_size - overlap, :]
+
+    def core_lookup(self, overlap: int) -> Dict[bytes, int]:
+        """A byte-keyed lookup from each candidate's core (patch content minus an `overlap`-pixel
+                border on every side) to its index -- built once per `overlap` value and cached.
+        Used by
+                decode to identify a gap patch whose border may have been softened by `_feather_canvas`,
+                without needing those (deliberately modified) border pixels to match exactly.
+        Raises if two
+                distinct candidates ever share an identical core: `MIN_CANDIDATE_DISTANCE_SQ` guarantees
+                every pair of full patches differs, but that's a guarantee about the whole patch, not
+                automatically about a smaller sub-region -- this is the actual, not assumed, check."""
+
+        cached = self._core_lookups.get(overlap)
+        if cached is not None:
+            return cached
+
+        lookup: Dict[bytes, int] = {}
+        for index, patch in enumerate(self.patches):
+            key = self._core(patch, overlap).tobytes()
+            if key in lookup:
+                raise ValueError(f"Patches {lookup[key]} and {index} share an identical core at overlap={overlap}; MIN_CANDIDATE_DISTANCE_SQ isn't wide enough for this texture!")
+            lookup[key] = index
+        self._core_lookups[overlap] = lookup
+        return lookup
+
+    def index_of_core(self, patch: np.ndarray, overlap: int) -> int:
+        try:
+            return self.core_lookup(overlap)[self._core(patch, overlap).tobytes()]
+        except KeyError:
+            raise ValueError("Patch's core doesn't match any entry in this source texture's patch library!") from None
 
 
 def _periodic_extract(texture: np.ndarray, row0: int, col0: int, patch_size: int) -> np.ndarray:
@@ -264,8 +345,65 @@ def _extract_patch(canvas: np.ndarray, row: int, col: int, patch_size: int) -> n
     return canvas[r0 : r0 + patch_size, c0 : c0 + patch_size]
 
 
+def _feather_canvas(canvas: np.ndarray, mask: np.ndarray, patch_size: int, overlap: int) -> np.ndarray:
+    """Softens the hard edge at every boundary that touches at least one gap patch, by linearly
+        cross-fading an `overlap`-pixel-wide band on the gap side(s) of that boundary toward the
+        neighbor's own nearest edge pixels.
+    Anchors are never modified -- only a gap patch's own outer
+        border is touched, and only that far, so decode's exact match on the interior (core) region is
+        unaffected by this pass regardless of how visible the untreated boundary would otherwise be.
+        Every gap patch gets every one of its internal edges treated the same way, uniformly, so decode
+        doesn't need to know which specific neighbors were anchors versus gaps -- it just always reads
+        the core.
+    Corners (touched by both an edge blend and its neighboring perpendicular blend) get a
+        small compounding effect, an accepted simplification for this first, deliberately thin pass."""
+
+    original = canvas.astype(np.float64)
+    blended = original.copy()
+    total_rows = canvas.shape[0] // patch_size
+    canvas_width = canvas.shape[1] // patch_size
+
+    for row in range(total_rows):
+        for col in range(canvas_width - 1):
+            left_is_anchor = _is_anchor(mask, row, col)
+            right_is_anchor = _is_anchor(mask, row, col + 1)
+            if left_is_anchor and right_is_anchor:
+                continue
+            r0, r1 = row * patch_size, (row + 1) * patch_size
+            left_edge = original[r0:r1, col * patch_size + patch_size - 1, :]
+            right_edge = original[r0:r1, (col + 1) * patch_size, :]
+            for offset in range(overlap):
+                weight = (offset + 1) / (overlap + 1)
+                if not left_is_anchor:
+                    c = col * patch_size + patch_size - overlap + offset
+                    blended[r0:r1, c, :] = original[r0:r1, c, :] * (1 - weight) + right_edge * weight
+                if not right_is_anchor:
+                    c = (col + 1) * patch_size + (overlap - 1 - offset)
+                    blended[r0:r1, c, :] = original[r0:r1, c, :] * (1 - weight) + left_edge * weight
+
+    for row in range(total_rows - 1):
+        for col in range(canvas_width):
+            top_is_anchor = _is_anchor(mask, row, col)
+            bottom_is_anchor = _is_anchor(mask, row + 1, col)
+            if top_is_anchor and bottom_is_anchor:
+                continue
+            c0, c1 = col * patch_size, (col + 1) * patch_size
+            top_edge = original[row * patch_size + patch_size - 1, c0:c1, :]
+            bottom_edge = original[(row + 1) * patch_size, c0:c1, :]
+            for offset in range(overlap):
+                weight = (offset + 1) / (overlap + 1)
+                if not top_is_anchor:
+                    r = row * patch_size + patch_size - overlap + offset
+                    blended[r, c0:c1, :] = blended[r, c0:c1, :] * (1 - weight) + bottom_edge * weight
+                if not bottom_is_anchor:
+                    r = (row + 1) * patch_size + (overlap - 1 - offset)
+                    blended[r, c0:c1, :] = blended[r, c0:c1, :] * (1 - weight) + top_edge * weight
+
+    return np.clip(blended, 0, 255).astype(np.uint8)
+
+
 def _encode_scattered(data: bytes, texture: np.ndarray, patch_size: int, canvas_width: int) -> np.ndarray:
-    library = PatchLibrary(texture, patch_size, stride=DEFAULT_CANDIDATE_STRIDE)
+    library = PatchLibrary(texture, patch_size, stride=DEFAULT_CANDIDATE_STRIDE, min_distance_sq=MIN_CANDIDATE_DISTANCE_SQ)
     mask = _anchor_mask(_mask_seed(texture), texture.shape[1] // patch_size, MIN_ANCHOR_DISTANCE)
     cursor = BitCursor(data)
     rows: List[List[np.ndarray]] = []
@@ -304,11 +442,12 @@ def _encode_scattered(data: bytes, texture: np.ndarray, patch_size: int, canvas_
         if cursor.remaining() <= 0:
             break
 
-    return _rows_to_canvas(rows)
+    canvas = _rows_to_canvas(rows)
+    return _feather_canvas(canvas, mask, patch_size, SEAM_OVERLAP)
 
 
 def _decode_scattered(canvas: np.ndarray, texture: np.ndarray, length: int, patch_size: int) -> bytes:
-    library = PatchLibrary(texture, patch_size, stride=DEFAULT_CANDIDATE_STRIDE)
+    library = PatchLibrary(texture, patch_size, stride=DEFAULT_CANDIDATE_STRIDE, min_distance_sq=MIN_CANDIDATE_DISTANCE_SQ)
     canvas_width = canvas.shape[1] // patch_size
     total_rows = canvas.shape[0] // patch_size
     mask = _anchor_mask(_mask_seed(texture), texture.shape[1] // patch_size, MIN_ANCHOR_DISTANCE)
@@ -320,17 +459,27 @@ def _decode_scattered(canvas: np.ndarray, texture: np.ndarray, length: int, patc
     for row_index in range(total_rows):
         row_patches: List[np.ndarray] = []
         for col in range(canvas_width):
-            patch = _extract_patch(canvas, row_index, col, patch_size)
-            row_patches.append(patch)
+            raw_patch = _extract_patch(canvas, row_index, col, patch_size)
 
-            if _is_anchor(mask, row_index, col) or accumulator.done():
+            if _is_anchor(mask, row_index, col):
+                row_patches.append(raw_patch)  # anchors are never touched by feathering; exact already.
+                continue
+
+            # Gap patches may have had their border softened by _feather_canvas, so identify them
+            # by their (untouched) core -- then use the library's pristine copy, not the raw
+            # (possibly blended) canvas pixels, for every later cell's above/left reference, so
+            # decode's scoring stays bit-for-bit consistent with what encode actually used.
+            actual_index = library.index_of_core(raw_patch, SEAM_OVERLAP)
+            resolved_patch = library.patches[actual_index]
+            row_patches.append(resolved_patch)
+
+            if accumulator.done():
                 continue
 
             above = rows[row_index - 1][col] if row_index > 0 else None
             left = row_patches[col - 1] if col > 0 else None
             candidates = _candidate_weights_scattered(library, texture, row_index, col, above, left)
             ranges, low, high, width = candidate_ranges(low, high, width, candidates, accumulator.remaining())
-            actual_index = library.index_of(patch)
             match: Optional[Tuple[int, int]] = next(((lo, hi) for i, lo, hi in ranges if i == actual_index), None)
             if match is None:
                 raise ValueError(f"Patch at (row={row_index}, col={col}) is not a valid candidate at this point in the synthesis walk!")

@@ -145,6 +145,47 @@ a different ack schema that keeps the derivable content small and enumerable eve
 missing-chunk list (e.g. a fixed-size bitmask instead of an open-ended list, if the maximum chunk
 count is bounded tightly enough).
 
+## Graph-cut seam-finding and Poisson blending for image patch borders (2026-09-10)
+
+*keywords: graph cut, Poisson image editing, Kwatra, GraphCut Textures, seam DP, SEAM_OVERLAP*
+
+**Idea.**
+To soften the hard edges between adjacent image-disguise patches, use the literature's
+actual state of the art for this exact problem: find a minimum-cost irregular seam through the
+overlap between two adjacent patches (Kwatra et al., "GraphCut Textures"), then gradient-domain
+blend along it (Pérez, Gangnet, Blake, "Poisson Image Editing") -- both cited as this project's own
+prior art already, via Efros & Freeman's image quilting.
+
+**What was tried.**
+Not implemented -- rejected on design grounds during scoping, before writing
+any seam/Poisson code.
+Re-measuring the widened-dedup minimum-distance guarantee specifically over
+each candidate's *core* (patch content minus a border reserved for blending) showed the safety
+margin is already thin for `voronoi` (~2.3 RMS) and `reaction_diffusion` (~1.6 RMS) at a 1-pixel
+border, and collapses entirely by 2 pixels (`reaction_diffusion`'s core margin drops to ~0.2 RMS,
+effectively zero) -- see the 2026-09-10 CHANGELOG.md entry.
+A 1-pixel overlap band leaves a
+seam-finding DP almost nothing to route around (only one pixel of "give" on each side of a
+boundary), and gradient blending needs real width to actually blend a gradient across.
+
+**Why rejected.**
+Both techniques' real advantage over a plain linear blend comes specifically
+from having a wide-enough overlap region to work with (8-16px is typical in the literature) --
+something the safety margins here don't allow for two of the three flavors this applies to.
+Building DP seam-finding and a gradient-domain solver for a border too thin to benefit from either
+would add substantial implementation complexity for no expected improvement over simple feathering
+at this scale.
+Plain linear feathering was implemented instead (`_feather_canvas`), confirmed via
+an isolated, apples-to-apples visual comparison to meaningfully soften `value_noise`/`voronoi`'s
+edges; `reaction_diffusion`'s change is negligible, consistent with its much tighter margin forcing
+an especially conservative blend.
+
+**What would reopen it.**
+A way to widen the core-region safety margin for `voronoi`/`reaction_diffusion`
+specifically (e.g. a stricter, per-flavor `MIN_CANDIDATE_DISTANCE_SQ`) enough to support a wider
+border -- untried, since it would shrink those flavors' already-reduced candidate libraries
+further, a trade-off nobody has evaluated yet.
+
 ## Overlapping candidate patches for the scattered image layout (2026-09-09)
 
 *keywords: DEFAULT_CANDIDATE_STRIDE, PatchLibrary stride, overlapping patches, Wu Wang*

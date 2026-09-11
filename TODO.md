@@ -41,6 +41,7 @@ on every push to `main`; it's a stateless demo, not the product.
 | D13. Whole-canvas-aware image generation | Done — gap-row patches now scored against the source texture's true content at that position (for 3 of 4 flavors); measured and confirmed a real visual improvement, not just the alignment bug fix | `CHANGELOG.md` |
 | Follow-up: image disguise's seed/gap row-banding | Done — scattered 2-D anchor placement (Wu & Wang's other departure) replaces the row-alternating layout for the 3 position-guided flavors; overlapping candidate patches (the other half of the technique) were also tried and measurably not worth it | `CHANGELOG.md` |
 | D3. Image texture synthesis visual quality on large-scale-structure textures | Closed, superseded — D13's mechanism addressed the same two flavors this named, via a different approach than either of this item's own untried directions | `CHANGELOG.md` |
+| Follow-up: image disguise patch-level blockiness | Done — `PatchLibrary` dedup widened to a guaranteed minimum pixel distance, then each gap patch's own border softened against its neighbors (`_feather_canvas`); graph-cut/Poisson blending scoped and rejected first — a 1px overlap band the safety margins allow leaves neither technique room to show its advantage | `CHANGELOG.md` |
 
 ---
 
